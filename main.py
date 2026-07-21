@@ -17,7 +17,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    print(f"管理页面：http://{args.host}:{args.port}")
     linux_runtime = prepare_linux_runtime(settings)
     if linux_runtime:
         print(
@@ -25,6 +24,7 @@ def main() -> None:
             f"CDP=127.0.0.1:{settings.linux_cdp_port}，"
             f"noVNC={settings.linux_novnc_bind_address}:{settings.linux_novnc_port}"
         )
+    print(f"管理页面启动地址：http://{args.host}:{args.port}")
     try:
         uvicorn.run(
             "app.main:app",
