@@ -1782,6 +1782,15 @@ class Database:
 
         return self._run(operation)
 
+    def count_creators(self) -> int:
+        def operation() -> int:
+            with self.session() as session:
+                return int(
+                    session.scalar(select(func.count()).select_from(Creator)) or 0
+                )
+
+        return self._run(operation)
+
     def list_creators_page(
         self, *, page: int = 1, page_size: int = 20
     ) -> dict[str, Any]:

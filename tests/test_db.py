@@ -125,6 +125,8 @@ def test_creator_list_page_is_database_paginated(tmp_path: Path) -> None:
     first = db.list_creators_page(page=1, page_size=20)
     second = db.list_creators_page(page=2, page_size=20)
 
+    assert db.count_creators() == 25
+
     assert first["total"] == 25
     assert first["total_pages"] == 2
     assert first["page"] == 1

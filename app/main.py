@@ -157,13 +157,12 @@ async def api_status() -> dict:
             asyncio.create_task(notify_login_verification())
     else:
         login_verification_notified = False
-    creators = db.list_creators()
     return {
         **login,
         "app_name": settings.app_name,
         "download_dir": str(settings.download_dir),
-        "creator_count": len(creators),
-        "active_scans": sum(service.task_running(int(item["id"])) for item in creators),
+        "creator_count": db.count_creators(),
+        "active_scans": service.active_scan_count(),
     }
 
 

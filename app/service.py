@@ -346,6 +346,9 @@ class SubscriptionService:
         task = self._tasks.get(creator_id)
         return bool(task and not task.done())
 
+    def active_scan_count(self) -> int:
+        return sum(1 for task in self._tasks.values() if not task.done())
+
     def _prepare_scan_job(
         self,
         creator_id: int,
