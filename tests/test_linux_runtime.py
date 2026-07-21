@@ -21,6 +21,27 @@ def test_linux_runtime_can_disable_chromium_sandbox_for_restricted_containers(
     assert command[:2] == ["chromium", "--no-sandbox"]
 
 
+def test_linux_runtime_replaces_stale_log_on_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        download_dir=tmp_path / "downloads",
+        browser_data_dir=tmp_path / "browser",
+    )
+    settings.ensure_dirs()
+    log_path = settings.data_dir / "linux-runtime.log"
+    log_path.write_text("old sandbox failure", encoding="utf-8")
+    runtime = LinuxRuntime(settings)
+    monkeypatch.setattr(runtime, "_find_binary", lambda *names: None)
+
+    with pytest.raises(RuntimeError, match="缺少"):
+        runtime.start()
+    runtime.stop()
+
+    assert log_path.read_bytes() == b""
+
+
 def test_linux_runtime_skips_when_external_cdp_is_configured(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

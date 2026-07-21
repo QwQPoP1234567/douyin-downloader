@@ -101,7 +101,7 @@ class LinuxRuntime:
 
     def start(self) -> None:
         self.settings.ensure_dirs()
-        self.log_file = (self.settings.data_dir / "linux-runtime.log").open("ab", buffering=0)
+        self.log_file = (self.settings.data_dir / "linux-runtime.log").open("wb", buffering=0)
         xvfb = self._find_binary("Xvfb")
         chrome = self._find_binary(
             "google-chrome",
