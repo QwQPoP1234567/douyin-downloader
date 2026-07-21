@@ -3,6 +3,8 @@ services:
     image: mysql:8.4
     container_name: douyin-mysql
     restart: unless-stopped
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-384m}
+    cpus: ${MYSQL_CPU_LIMIT:-0.50}
     environment:
       TZ: UTC
       MYSQL_DATABASE: ${MYSQL_DATABASE:-douyin}
@@ -35,7 +37,9 @@ services:
     init: true
     restart: unless-stopped
     stop_grace_period: 2m
-    shm_size: "1gb"
+    mem_limit: ${DOUYIN_APP_MEMORY_LIMIT:-1024m}
+    cpus: ${DOUYIN_APP_CPU_LIMIT:-1.25}
+    shm_size: ${DOUYIN_SHM_SIZE:-256mb}
     depends_on:
       mysql:
         condition: service_healthy
