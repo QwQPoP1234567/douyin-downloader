@@ -1,0 +1,26 @@
+name: 功能建议
+description: 提议与本地归档、任务管理或部署相关的改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 当前遇到了什么问题？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 希望项目如何处理？有哪些兼容性或资源占用要求？
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: 使用边界
+      options:
+        - label: 该建议不要求绕过验证码、权限控制、付费限制或平台安全机制
+          required: true

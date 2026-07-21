@@ -1,0 +1,14 @@
+services:
+  setup:
+    image: python:3.12-alpine
+    container_name: douyin-setup
+    restart: "no"
+    environment:
+      SETUP_WORKSPACE: /workspace
+      SETUP_PORT: 8780
+    command: ["python", "/app/docker_setup.py"]
+    ports:
+      - "8780:8780"
+    volumes:
+      - "./scripts/docker_setup.py:/app/docker_setup.py:ro"
+      - ".:/workspace"

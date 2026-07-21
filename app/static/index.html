@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>抖音视频订阅下载器</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="brand-mark"><span>DY</span><div><strong>本地作品库</strong><small>NAS CONTROL</small></div></div>
+        <nav id="mainNav" class="main-nav" aria-label="主导航">
+          <button class="nav-item active" data-route="dashboard"><span>⌂</span>控制台</button>
+          <button class="nav-item" data-route="add"><span>＋</span>添加监控</button>
+          <button class="nav-item" data-route="creators"><span>◎</span>监控用户</button>
+          <button class="nav-item" data-route="videos"><span>▦</span>作品库</button>
+          <button class="nav-item" data-route="pending"><span>◷</span>待确认作品</button>
+          <button class="nav-item" data-route="downloads"><span>⇩</span>下载任务</button>
+          <button class="nav-item" data-route="settings"><span>⚙</span>系统设置</button>
+          <button class="nav-item" data-route="logs"><span>≡</span>运行日志</button>
+        </nav>
+        <div class="sidebar-foot"><div id="sidebarLoginDot" class="status-dot"></div><span id="sidebarLoginText">正在检查账号状态</span></div>
+      </aside>
+      <div class="workspace">
+    <div id="requestFeedback" class="request-feedback" role="status" hidden><span id="requestFeedbackText">正在加载…</span><button id="requestRetry" type="button" hidden>重试当前页面</button></div>
+    <header data-view="dashboard">
+      <div>
+        <p class="eyebrow">LOCAL VIDEO ARCHIVE</p>
+        <h1>抖音视频订阅下载器</h1>
+        <p class="subtitle">登录一次，持续追踪你选择的创作者，并将新作品保存到本机。</p>
+      </div>
+      <div id="loginBadge" class="badge neutral">浏览器未启动</div>
+    </header>
+
+    <section class="dashboard-stats" data-view="dashboard">
+      <article><span>账号状态</span><strong id="dashboardLogin">检查中</strong><small>抖音浏览器会话</small></article>
+      <article><span>监控用户</span><strong id="dashboardCreators">0</strong><small>已加入计划</small></article>
+      <article><span>活动扫描</span><strong id="dashboardScans">0</strong><small>当前运行任务</small></article>
+      <article><span>存储目录</span><strong id="dashboardStorage">—</strong><small>本地持久化位置</small></article>
+    </section>
+
+    <section class="panel login-panel" data-view="dashboard">
+      <div>
+        <h2>账号会话</h2>
+        <p id="loginHint">点击后会打开独立浏览器。请扫码登录；遇到验证码也在这个窗口手动完成。</p>
+      </div>
+      <div class="actions">
+        <button id="loginButton" class="primary">打开登录 / 验证浏览器</button>
+        <button id="refreshButton">刷新状态</button>
+      </div>
+    </section>
+
+    <section class="panel view-heading" data-view="add">
+      <div class="section-head">
+        <div>
+          <h2>添加监控用户</h2>
+          <p>支持用户主页链接和可跳转到作者主页的抖音短链接。</p>
+        </div>
+      </div>
+      <form id="creatorForm" class="add-form">
+        <input id="profileUrl" type="url" required placeholder="https://www.douyin.com/user/...">
+        <button id="previewStart" class="primary" type="submit">获取用户作品</button>
+      </form>
+    </section>
+
+    <section id="previewPanel" class="panel preview-panel" data-view="add" hidden>
+      <div class="section-head preview-head">
+        <div class="profile-summary">
+          <img id="previewAvatar" class="avatar" alt="用户头像" hidden>
+          <div><h2 id="previewTitle">正在获取用户作品</h2><p id="previewStatus">准备扫描最近 100 条作品…</p></div>
+        </div>
+        <div class="actions">
+          <label class="continue-limit">继续数量 <input id="previewContinueLimit" type="number" min="20" max="1000" value="100"></label>
+          <button id="previewContinue" type="button">继续获取更早作品</button>
+          <button id="previewCancel" type="button" class="danger">取消扫描</button>
+        </div>
+      </div>
+      <form id="previewFilters" class="filter-bar">
+        <input id="previewKeyword" placeholder="搜索作品标题">
+        <select id="previewType"><option value="">全部类型</option><option value="video">视频</option><option value="images">图文</option></select>
+        <select id="previewSort"><option value="desc">发布时间从新到旧</option><option value="asc">发布时间从旧到新</option></select>
+        <select id="previewPageSize"><option value="30">每页 30 条</option><option value="60">每页 60 条</option><option value="100">每页 100 条</option></select>
+        <button type="submit">应用筛选</button>
+      </form>
+      <div class="selection-bar">
+        <div class="actions">
+          <button id="selectPage" type="button">全选当前页</button><button id="clearPage" type="button">取消当前页</button>
+          <button id="selectAllPreview" type="button">全选已发现作品</button><button id="selectFilteredPreview" type="button">全选筛选结果</button>
+          <button id="clearAllPreview" type="button">取消全部</button>
+        </div>
+        <label class="switch-label"><input id="autoSelectNew" type="checkbox"> 自动选择后续发现作品</label>
+        <strong id="selectedCount">已选择 0 条</strong>
+      </div>
+      <div id="previewVideos" class="preview-grid"></div>
+      <div class="pager"><button id="previewPrev" type="button">上一页</button><span id="previewPageText">第 1 页</span><input id="previewJump" type="number" min="1" value="1"><button id="previewJumpButton" type="button">跳转</button><button id="previewNext" type="button">下一页</button></div>
+      <form id="previewConfirmForm" class="confirm-form">
+        <h3>确认添加监控</h3>
+        <label>下载策略<select id="previewPolicy"><option value="manual_selected_only">仅下载本次手动选择</option><option value="selected_then_auto_new">下载选中历史，后续自动下载新作品</option><option value="all_history_then_auto_new">下载全部历史，后续自动下载新作品</option><option value="new_only_auto">不下载历史，仅下载后续新作品</option><option value="metadata_only">只收集作品信息</option><option value="new_pending_confirmation">后续新作品进入待确认</option></select></label>
+        <p id="previewPolicyDescription" class="policy-description"></p>
+        <label>执行频率<select id="previewScheduleType"><option value="minutes">每若干分钟</option><option value="hours">每若干小时</option><option value="daily">每天一次</option><option value="days">每若干天</option></select></label>
+        <label>间隔<input id="previewIntervalValue" type="number" min="1" value="60"></label>
+        <label id="previewDailyTimeLabel" hidden>每天时间<input id="previewDailyTime" type="time" value="03:00"></label>
+        <label class="switch-label"><input id="previewImmediate" type="checkbox"> 立即下载已选作品</label>
+        <div id="previewConfirmSummary" class="confirm-summary">已选择 0 条，预计创建 0 个下载任务</div>
+        <button id="previewConfirm" class="primary" type="submit">确认添加</button>
+      </form>
+    </section>
+
+    <section class="panel view-heading" data-view="settings">
+      <div class="section-head">
+        <div><h2>保存设置</h2><p>修改后只影响后续下载，已经保存的文件不会移动。</p></div>
+      </div>
+      <form id="settingsForm" class="settings-form">
+        <input id="downloadDir" required placeholder="E:\\douyin\\downloads">
+        <button id="settingsSave" type="submit">保存下载目录</button>
+      </form>
+    </section>
+
+    <section class="panel" data-view="settings">
+      <div class="section-head">
+        <div><h2>钉钉告警</h2><p>自定义机器人 Webhook 加签，推送验证码、成功、失败和重复异常。</p></div>
+        <label class="switch-label"><input id="dingEnabled" type="checkbox"> 启用</label>
+      </div>
+      <form id="dingForm" class="ding-form">
+        <input id="dingWebhook" type="url" placeholder="https://oapi.dingtalk.com/robot/send?access_token=...">
+        <input id="dingSecret" type="password" placeholder="加签密钥 SEC...（留空保持原值）">
+        <button type="submit">保存配置</button>
+        <button id="dingTest" type="button">发送测试</button>
+      </form>
+      <p id="dingStatus" class="setting-status"></p>
+    </section>
+
+    <section class="panel view-heading" data-view="creators">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">CREATOR MONITORING</p>
+          <h2>监控用户</h2>
+          <p id="summary">尚未添加用户</p>
+        </div>
+        <div class="actions"><button data-route-jump="add" class="primary">添加监控</button><select id="creatorPageSize"><option value="20">每页 20 位</option><option value="50">每页 50 位</option><option value="100">每页 100 位</option></select></div>
+      </div>
+      <div id="creators" class="creator-list"></div>
+      <div class="pager"><button id="creatorPrev" type="button">上一页</button><span id="creatorPageText">第 1 页</span><input id="creatorJump" type="number" min="1" value="1"><button id="creatorJumpButton" type="button">跳转</button><button id="creatorNext" type="button">下一页</button></div>
+    </section>
+
+    <section class="grid-two" data-view="dashboard">
+      <section class="panel">
+        <div class="section-head"><h2>最近作品</h2><button id="videosRefresh">刷新</button></div>
+        <div id="videos" class="compact-list"></div>
+      </section>
+      <section class="panel">
+        <div class="section-head"><h2>运行日志</h2><button id="logsRefresh">刷新</button></div>
+        <div id="logs" class="compact-list logs"></div>
+      </section>
+    </section>
+    <section class="panel view-heading" data-view="videos" hidden>
+      <div class="section-head"><div><p class="eyebrow">MEDIA LIBRARY</p><h2>作者作品库</h2><p id="videoLibrarySummary">默认展示已下载作品，并按作者账户整理。</p></div><button id="videoLibraryRefresh">刷新作品</button></div>
+      <form id="videoLibraryFilters" class="filter-bar media-filters">
+        <select id="videoCreatorFilter"><option value="">全部监控用户</option></select>
+        <input id="videoKeyword" placeholder="搜索作品标题">
+        <select id="videoStatusFilter"><option value="">全部下载状态</option><option value="pending">等待下载</option><option value="downloading">下载中</option><option value="downloaded" selected>已下载</option><option value="failed">下载失败</option></select>
+        <select id="videoTypeFilter"><option value="">全部类型</option><option value="video">视频</option><option value="images">图文</option></select>
+        <select id="videoSort"><option value="newest">最新发布优先</option><option value="oldest">最早发布优先</option></select>
+        <select id="videoPageSize"><option value="30">每页 30 条</option><option value="60">每页 60 条</option><option value="100">每页 100 条</option></select>
+        <button type="submit">应用筛选</button>
+      </form>
+      <div class="selection-bar">
+        <div class="actions"><button id="videoSelectPage" type="button">全选当前页</button><button id="videoClearSelection" type="button">清空选择</button><button id="videoBulkDownload" type="button" class="primary">批量下载</button><button id="videoBulkRetry" type="button">批量重试失败项</button></div>
+        <strong id="videoSelectedCount">已选择 0 条</strong>
+      </div>
+      <div id="videoLibrary" class="creator-media-library"></div>
+      <div class="pager"><button id="videoPrev" type="button">上一页</button><span id="videoPageText">第 1 页</span><input id="videoJump" type="number" min="1" value="1"><button id="videoJumpButton" type="button">跳转</button><button id="videoNext" type="button">下一页</button></div>
+    </section>
+    <section class="panel view-heading" data-view="pending" hidden>
+      <div class="section-head"><div><p class="eyebrow">REVIEW QUEUE</p><h2>待确认作品</h2><p id="pendingSummary">检查后续发现、但需要人工确认是否下载的作品。</p></div><button id="pendingRefresh">刷新列表</button></div>
+      <form id="pendingFilters" class="filter-bar">
+        <select id="pendingCreatorFilter"><option value="">全部监控用户</option></select>
+        <input id="pendingKeyword" placeholder="搜索作品标题">
+        <select id="pendingType"><option value="">全部类型</option><option value="video">视频</option><option value="images">图文</option></select>
+        <select id="pendingSort"><option value="newest">最新发布优先</option><option value="oldest">最早发布优先</option></select>
+        <select id="pendingPageSize"><option value="30">每页 30 条</option><option value="60">每页 60 条</option><option value="100">每页 100 条</option></select>
+        <button type="submit">应用筛选</button>
+      </form>
+      <div class="selection-bar"><div class="actions"><button id="pendingSelectPage" type="button">全选当前页</button><button id="pendingClear" type="button">清空选择</button><button id="pendingDownload" type="button" class="primary">确认并下载</button><button id="pendingKeep" type="button">只保留作品信息</button></div><strong id="pendingSelectedCount">已选择 0 条</strong></div>
+      <div id="pendingVideos" class="media-grid"></div>
+      <div class="pager"><button id="pendingPrev" type="button">上一页</button><span id="pendingPageText">第 1 页</span><input id="pendingJump" type="number" min="1" value="1"><button id="pendingJumpButton" type="button">跳转</button><button id="pendingNext" type="button">下一页</button></div>
+    </section>
+    <section class="panel view-heading" data-view="downloads" hidden>
+      <div class="section-head"><div><p class="eyebrow">DOWNLOAD QUEUE</p><h2>下载任务</h2><p id="downloadJobsSummary">查看队列、实时进度、速度、错误与重试状态。</p></div><button id="downloadJobsRefresh">刷新任务</button></div>
+      <form id="downloadJobFilters" class="filter-bar download-filters">
+        <select id="downloadCreatorFilter"><option value="">全部监控用户</option></select>
+        <select id="downloadStatusFilter"><option value="">全部任务状态</option><option value="queued">等待中</option><option value="running">下载中</option><option value="paused">已暂停</option><option value="completed">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select>
+        <select id="downloadPageSize"><option value="30">每页 30 条</option><option value="60">每页 60 条</option><option value="100">每页 100 条</option></select>
+        <button type="submit">应用筛选</button>
+      </form>
+      <div id="downloadJobs" class="job-list"></div>
+      <div class="pager"><button id="downloadPrev" type="button">上一页</button><span id="downloadPageText">第 1 页</span><input id="downloadJump" type="number" min="1" value="1"><button id="downloadJumpButton" type="button">跳转</button><button id="downloadNext" type="button">下一页</button></div>
+    </section>
+    <section class="panel view-heading" data-view="logs" hidden>
+      <div class="section-head"><div><p class="eyebrow">EVENT STREAM</p><h2>运行日志</h2><p id="logsPageSummary">按级别分页查看扫描、下载和系统事件。</p></div><button id="logsPageRefresh">刷新日志</button></div>
+      <form id="logsPageFilters" class="filter-bar log-filters"><select id="logsLevel"><option value="">全部级别</option><option value="success">成功</option><option value="info">信息</option><option value="warning">警告</option><option value="error">错误</option></select><select id="logsPageSize"><option value="50">每页 50 条</option><option value="100">每页 100 条</option></select><button type="submit">应用筛选</button></form>
+      <div id="logsPage" class="event-list"></div>
+      <div class="pager"><button id="logsPrev" type="button">上一页</button><span id="logsPageText">第 1 页</span><input id="logsJump" type="number" min="1" value="1"><button id="logsJumpButton" type="button">跳转</button><button id="logsNext" type="button">下一页</button></div>
+    </section>
+    <section id="playerView" class="player-view" data-view="player" hidden tabindex="-1">
+      <div class="player-topbar"><button id="playerClose" type="button">← 返回作品库</button><div><strong id="playerPosition">0 / 0</strong><span id="playerTypeLabel">本地播放</span></div></div>
+      <div class="player-stage">
+        <button id="playerPrevious" class="player-switch previous" type="button" aria-label="上一条">↑</button>
+        <div id="playerMedia" class="player-media"><div class="player-empty">从作品库点击已下载作品开始播放</div></div>
+        <div id="playerAcceleration" class="player-acceleration" hidden>长按加速 2×</div>
+        <button id="playerNext" class="player-switch next" type="button" aria-label="下一条">↓</button>
+      </div>
+      <div class="player-footer"><div><h2 id="playerTitle">尚未选择作品</h2><p id="playerCreator">—</p></div><div class="player-hints"><span>↑ 上一条</span><span>↓ 下一条</span><span>空格 播放/暂停</span><span>长按 → 临时 2×</span><span>Esc 退出</span><div class="zoom-controls"><button id="playerZoomOut" type="button" aria-label="缩小">−</button><span id="playerZoomText">100%</span><button id="playerZoomIn" type="button" aria-label="放大">＋</button><button id="playerZoomReset" type="button">复位</button></div><label>倍速<select id="playerSpeed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select></label><label class="switch-label"><input id="playerPersistSpeed" type="checkbox" checked> 持续保持倍速</label><label class="switch-label"><input id="playerAutoNext" type="checkbox" checked> 自动播放下一条（关闭则循环当前视频）</label></div></div>
+    </section>
+      </div>
+    </div>
+    <dialog id="deleteCreatorDialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2>删除监控用户</h2>
+        <p id="deleteCreatorSummary"></p>
+        <label class="danger-option">
+          <input id="deleteCreatorFiles" type="checkbox">
+          同时删除下载目录中的本地文件
+        </label>
+        <p class="dialog-note">默认保留本地文件。扫描和下载任务会先停止，再执行删除。</p>
+        <div class="dialog-actions">
+          <button value="cancel">取消</button>
+          <button id="deleteCreatorConfirm" value="default" type="button" class="danger">确认删除</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="editCreatorDialog" class="confirm-dialog edit-dialog">
+      <form id="editCreatorForm">
+        <div class="section-head"><div><p class="eyebrow">MONITOR SETTINGS</p><h2 id="editCreatorTitle">编辑监控用户</h2></div><button id="editCreatorClose" type="button">关闭</button></div>
+        <div class="dialog-grid">
+          <label>下载策略<select id="editCreatorPolicy"><option value="manual_selected_only">仅下载手动选择</option><option value="selected_then_auto_new">选中历史 + 自动下载新作品</option><option value="all_history_then_auto_new">全部历史 + 自动下载新作品</option><option value="new_only_auto">只自动下载后续新作品</option><option value="metadata_only">只收集作品信息</option><option value="new_pending_confirmation">新作品进入待确认</option></select><small id="editPolicyDescription" class="policy-description"></small></label>
+          <label>执行频率<select id="editScheduleType"><option value="minutes">每若干分钟</option><option value="hours">每若干小时</option><option value="daily">每天一次</option><option value="days">每若干天</option></select></label>
+          <label>间隔数值<input id="editIntervalValue" type="number" min="1" max="10080" required></label>
+          <label id="editDailyTimeLabel" hidden>每天时间<input id="editDailyTime" type="time"></label>
+          <label>单次扫描数量<input id="editScanLimit" type="number" min="20" max="1000" required></label>
+          <label class="switch-label"><input id="editCreatorEnabled" type="checkbox"> 启用自动监控</label>
+        </div>
+        <div class="dialog-actions"><button id="editCreatorSave" class="primary" type="submit">保存并立即生效</button></div>
+      </form>
+    </dialog>
+    <dialog id="deleteVideoDialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2>删除作品记录</h2>
+        <p id="deleteVideoSummary"></p>
+        <label class="danger-option"><input id="deleteVideoFiles" type="checkbox"> 同时删除下载目录中的本地文件</label>
+        <p class="dialog-note">默认只删除数据库记录并保留本地文件。文件删除失败时会保留数据库记录。</p>
+        <div class="dialog-actions"><button value="cancel">取消</button><button id="deleteVideoConfirm" value="default" type="button" class="danger">确认删除</button></div>
+      </form>
+    </dialog>
+    <dialog id="continueScanDialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2>继续获取更早作品</h2>
+        <p>本次续扫会创建独立任务，不改变该用户以后自动扫描的数量设置。</p>
+        <label class="dialog-field">本次最多获取条数<input id="continueScanLimit" type="number" min="20" max="1000" value="100" required></label>
+        <div class="dialog-actions"><button value="cancel">取消</button><button id="continueScanConfirm" type="button" class="primary">开始续扫</button></div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status"></div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

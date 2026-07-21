@@ -1,0 +1,2 @@
+"""Douyin subscription downloader."""
+

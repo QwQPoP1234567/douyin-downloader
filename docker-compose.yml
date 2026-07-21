@@ -1,0 +1,93 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: douyin-mysql
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-douyin}
+      MYSQL_USER: ${MYSQL_USER:-douyin}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-128M}
+      - --innodb-log-buffer-size=${MYSQL_INNODB_LOG_BUFFER_SIZE:-16M}
+      - --max-connections=${MYSQL_MAX_CONNECTIONS:-30}
+      - --performance-schema=OFF
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_PASSWORD}\" mysqladmin ping -h 127.0.0.1 -u \"$${MYSQL_USER}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
+  douyin-downloader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: douyin-subscription-downloader:local
+    container_name: douyin-downloader
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    shm_size: "1gb"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DOUYIN_HOST: 0.0.0.0
+      DOUYIN_PORT: 8765
+      DOUYIN_DATA_DIR: /app/data
+      DOUYIN_DOWNLOAD_DIR: /app/downloads
+      DOUYIN_BROWSER_DATA_DIR: /app/browser_data
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-douyin}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-douyin}?charset=utf8mb4
+      DOUYIN_DATABASE_POOL_SIZE: ${DOUYIN_DATABASE_POOL_SIZE:-3}
+      DOUYIN_DATABASE_MAX_OVERFLOW: ${DOUYIN_DATABASE_MAX_OVERFLOW:-1}
+      DOUYIN_DATABASE_POOL_RECYCLE_SECONDS: ${DOUYIN_DATABASE_POOL_RECYCLE_SECONDS:-1800}
+      DOUYIN_DATABASE_CONNECT_RETRIES: ${DOUYIN_DATABASE_CONNECT_RETRIES:-3}
+      DOUYIN_MAX_SCAN_SCROLLS: ${DOUYIN_MAX_SCAN_SCROLLS:-300}
+      DOUYIN_SCAN_MAX_RUNTIME_SECONDS: ${DOUYIN_SCAN_MAX_RUNTIME_SECONDS:-900}
+      DOUYIN_SCAN_BATCH_SIZE: ${DOUYIN_SCAN_BATCH_SIZE:-30}
+      DOUYIN_SCAN_NO_PROGRESS_SECONDS: ${DOUYIN_SCAN_NO_PROGRESS_SECONDS:-90}
+      DOUYIN_SCAN_CONTINUE_LIMIT: ${DOUYIN_SCAN_CONTINUE_LIMIT:-100}
+      DOUYIN_SCHEDULE_JITTER_SECONDS: ${DOUYIN_SCHEDULE_JITTER_SECONDS:-120}
+      DOUYIN_PREVIEW_SESSION_TTL_MINUTES: ${DOUYIN_PREVIEW_SESSION_TTL_MINUTES:-120}
+      DOUYIN_REQUEST_TIMEOUT_SECONDS: ${DOUYIN_REQUEST_TIMEOUT_SECONDS:-90}
+      DOUYIN_LINUX_AUTO_BROWSER: "true"
+      DOUYIN_LINUX_NOVNC_ENABLED: ${DOUYIN_LINUX_NOVNC_ENABLED:-true}
+      DOUYIN_LINUX_NOVNC_MODE: ${DOUYIN_LINUX_NOVNC_MODE:-on_demand}
+      DOUYIN_LINUX_NOVNC_IDLE_SECONDS: ${DOUYIN_LINUX_NOVNC_IDLE_SECONDS:-120}
+      DOUYIN_LINUX_NOVNC_BIND_ADDRESS: 0.0.0.0
+      DOUYIN_LINUX_VNC_PASSWORD: ${DOUYIN_VNC_PASSWORD:?请在 .env 中设置 DOUYIN_VNC_PASSWORD}
+      DOUYIN_LINUX_VNC_POLL_MS: ${DOUYIN_LINUX_VNC_POLL_MS:-80}
+      DOUYIN_LINUX_VNC_DEFER_MS: ${DOUYIN_LINUX_VNC_DEFER_MS:-80}
+      DOUYIN_DOWNLOAD_CONCURRENCY: ${DOUYIN_DOWNLOAD_CONCURRENCY:-1}
+      DOUYIN_DINGTALK_ENABLED: ${DOUYIN_DINGTALK_ENABLED:-false}
+      DOUYIN_DINGTALK_WEBHOOK: ${DOUYIN_DINGTALK_WEBHOOK:-}
+      DOUYIN_DINGTALK_SECRET: ${DOUYIN_DINGTALK_SECRET:-}
+    ports:
+      - "${DOUYIN_WEB_PORT:-8765}:8765"
+      - "${DOUYIN_NOVNC_PORT:-6080}:6080"
+    volumes:
+      - "${DOUYIN_DATA_PATH:-./data}:/app/data"
+      - "${DOUYIN_DOWNLOAD_PATH:-./downloads}:/app/downloads"
+      - "${DOUYIN_BROWSER_PATH:-./browser_data}:/app/browser_data"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8765/api/health',timeout=3); assert json.load(r).get('ok')"
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+
+volumes:
+  mysql_data:

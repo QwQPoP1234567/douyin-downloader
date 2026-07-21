@@ -1,0 +1,46 @@
+name: Bug 报告
+description: 报告可复现的程序问题（请先移除所有隐私数据）
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请勿粘贴 Cookie、Token、Webhook、真实作者 UID、下载内容或 `.env`。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 提交哈希、版本号或镜像标签
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 运行环境
+      options:
+        - Windows 本地
+        - Linux 本地
+        - Docker
+        - 群晖 Container Manager
+        - 其他 NAS
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述与复现步骤
+      placeholder: 请写出预期行为、实际行为和最小复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏日志
+      render: shell
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已移除 Cookie、Token、密码、Webhook、真实账号信息和本机隐私路径
+          required: true
