@@ -528,6 +528,7 @@ async def list_videos(
     sort: str = Query(default="newest", pattern="^(newest|oldest)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=30, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=256),
 ) -> dict:
     try:
         return db.list_videos_page(
