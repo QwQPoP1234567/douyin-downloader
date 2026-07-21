@@ -59,6 +59,26 @@ class LinuxRuntime:
         self.processes.append(process)
         return process
 
+    def _build_chrome_command(self, chrome: str) -> list[str]:
+        command = [
+            chrome,
+            "--remote-debugging-address=127.0.0.1",
+            f"--remote-debugging-port={self.settings.linux_cdp_port}",
+            f"--user-data-dir={self.settings.browser_data_dir}",
+            "--disable-dev-shm-usage",
+            "--disable-notifications",
+            "--keep-alive-for-test",
+            "--password-store=basic",
+            "--no-first-run",
+            "--window-size=1440,940",
+            "https://www.douyin.com/",
+        ]
+        if self.settings.linux_chromium_no_sandbox or (
+            hasattr(os, "geteuid") and os.geteuid() == 0
+        ):
+            command.insert(1, "--no-sandbox")
+        return command
+
     @staticmethod
     def _wait_for_port(port: int, process: subprocess.Popen[bytes], timeout: float = 15) -> None:
         deadline = time.monotonic() + timeout
@@ -111,21 +131,7 @@ class LinuxRuntime:
         )
         os.environ["DISPLAY"] = display
         self._clear_stale_chromium_locks()
-        chrome_command = [
-            chrome,
-            "--remote-debugging-address=127.0.0.1",
-            f"--remote-debugging-port={self.settings.linux_cdp_port}",
-            f"--user-data-dir={self.settings.browser_data_dir}",
-            "--disable-dev-shm-usage",
-            "--disable-notifications",
-            "--keep-alive-for-test",
-            "--password-store=basic",
-            "--no-first-run",
-            "--window-size=1440,940",
-            "https://www.douyin.com/",
-        ]
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
-            chrome_command.insert(1, "--no-sandbox")
+        chrome_command = self._build_chrome_command(chrome)
         chrome_process = self._spawn(chrome_command)
         try:
             self._wait_for_port(self.settings.linux_cdp_port, chrome_process)

@@ -3,7 +3,22 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.linux_runtime import prepare_linux_runtime
+from app.linux_runtime import LinuxRuntime, prepare_linux_runtime
+
+
+def test_linux_runtime_can_disable_chromium_sandbox_for_restricted_containers(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        download_dir=tmp_path / "downloads",
+        browser_data_dir=tmp_path / "browser",
+        linux_chromium_no_sandbox=True,
+    )
+
+    command = LinuxRuntime(settings)._build_chrome_command("chromium")
+
+    assert command[:2] == ["chromium", "--no-sandbox"]
 
 
 def test_linux_runtime_skips_when_external_cdp_is_configured(

@@ -60,6 +60,9 @@ services:
       DOUYIN_PREVIEW_SESSION_TTL_MINUTES: ${DOUYIN_PREVIEW_SESSION_TTL_MINUTES:-120}
       DOUYIN_REQUEST_TIMEOUT_SECONDS: ${DOUYIN_REQUEST_TIMEOUT_SECONDS:-90}
       DOUYIN_LINUX_AUTO_BROWSER: "true"
+      # Some NAS/container hosts prohibit Chromium namespace sandboxing.
+      # The application process itself still runs as the non-root douyin user.
+      DOUYIN_LINUX_CHROMIUM_NO_SANDBOX: "true"
       DOUYIN_LINUX_NOVNC_ENABLED: ${DOUYIN_LINUX_NOVNC_ENABLED:-true}
       DOUYIN_LINUX_NOVNC_MODE: ${DOUYIN_LINUX_NOVNC_MODE:-on_demand}
       DOUYIN_LINUX_NOVNC_IDLE_SECONDS: ${DOUYIN_LINUX_NOVNC_IDLE_SECONDS:-120}

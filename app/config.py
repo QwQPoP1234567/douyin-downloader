@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     browser_proxy: str | None = None
     browser_cdp_url: str | None = None
     linux_auto_browser: bool = True
+    linux_chromium_no_sandbox: bool = False
     linux_display: str = ":99"
     linux_cdp_port: int = 9222
     linux_novnc_enabled: bool = True
