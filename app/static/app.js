@@ -1130,7 +1130,7 @@ $("#previewConfirmForm").addEventListener("submit", async event => {
   const button = $("#previewConfirm");
   button.disabled = true;
   try {
-    const result = await api(`/api/previews/${previewState.token}/confirm`, {method: "POST", body: JSON.stringify({...previewConfirmationPayload(), idempotency_key: crypto.randomUUID()})});
+    const result = await api(`/api/previews/${previewState.token}/confirm`, {method: "POST", body: JSON.stringify({...previewConfirmationPayload(), idempotency_key: createIdempotencyKey()})});
     clearTimeout(previewState.timer);
     toast(`已添加监控用户，并创建 ${result.download_jobs_created} 个下载任务`);
     $("#previewPanel").hidden = true;
