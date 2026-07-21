@@ -71,7 +71,7 @@ class LinuxRuntime:
             "--password-store=basic",
             "--no-first-run",
             "--window-size=1440,940",
-            "https://www.douyin.com/",
+            "about:blank",
         ]
         if self.settings.linux_chromium_no_sandbox or (
             hasattr(os, "geteuid") and os.geteuid() == 0

@@ -19,6 +19,7 @@ def test_linux_runtime_can_disable_chromium_sandbox_for_restricted_containers(
     command = LinuxRuntime(settings)._build_chrome_command("chromium")
 
     assert command[:2] == ["chromium", "--no-sandbox"]
+    assert command[-1] == "about:blank"
 
 
 def test_linux_runtime_replaces_stale_log_on_start(
