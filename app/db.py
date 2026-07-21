@@ -1728,24 +1728,32 @@ class Database:
         )
         return result
 
+    @staticmethod
+    def _active_scan_job_ids():
+        return (
+            select(
+                ScanJob.creator_id.label("creator_id"),
+                func.max(ScanJob.id).label("job_id"),
+            )
+            .where(ScanJob.status.in_(ACTIVE_SCAN_JOB_STATUSES))
+            .group_by(ScanJob.creator_id)
+            .subquery()
+        )
+
     def get_creator_detail(self, creator_id: int) -> dict[str, Any]:
         def operation() -> dict[str, Any]:
             with self.session() as session:
-                active_job_id = (
-                    select(func.max(ScanJob.id))
-                    .where(
-                        ScanJob.creator_id == Creator.id,
-                        ScanJob.status.in_(ACTIVE_SCAN_JOB_STATUSES),
-                    )
-                    .correlate(Creator)
-                    .scalar_subquery()
-                )
+                active_job_ids = self._active_scan_job_ids()
                 row = session.execute(
                     select(Creator, CreatorSchedule, ScanJob)
                     .outerjoin(
                         CreatorSchedule, CreatorSchedule.creator_id == Creator.id
                     )
-                    .outerjoin(ScanJob, ScanJob.id == active_job_id)
+                    .outerjoin(
+                        active_job_ids,
+                        active_job_ids.c.creator_id == Creator.id,
+                    )
+                    .outerjoin(ScanJob, ScanJob.id == active_job_ids.c.job_id)
                     .where(Creator.id == creator_id)
                 ).one_or_none()
                 if row is None:
@@ -1757,21 +1765,17 @@ class Database:
     def list_creators(self) -> list[dict[str, Any]]:
         def operation() -> list[dict[str, Any]]:
             with self.session() as session:
-                active_job_id = (
-                    select(func.max(ScanJob.id))
-                    .where(
-                        ScanJob.creator_id == Creator.id,
-                        ScanJob.status.in_(ACTIVE_SCAN_JOB_STATUSES),
-                    )
-                    .correlate(Creator)
-                    .scalar_subquery()
-                )
+                active_job_ids = self._active_scan_job_ids()
                 rows = session.execute(
                     select(Creator, CreatorSchedule, ScanJob)
                     .outerjoin(
                         CreatorSchedule, CreatorSchedule.creator_id == Creator.id
                     )
-                    .outerjoin(ScanJob, ScanJob.id == active_job_id)
+                    .outerjoin(
+                        active_job_ids,
+                        active_job_ids.c.creator_id == Creator.id,
+                    )
+                    .outerjoin(ScanJob, ScanJob.id == active_job_ids.c.job_id)
                     .order_by(Creator.created_at.desc(), Creator.id.desc())
                 ).all()
                 return [self._creator_detail_dict(*row) for row in rows]
@@ -1787,21 +1791,17 @@ class Database:
         def operation() -> dict[str, Any]:
             with self.session() as session:
                 total = int(session.scalar(select(func.count()).select_from(Creator)) or 0)
-                active_job_id = (
-                    select(func.max(ScanJob.id))
-                    .where(
-                        ScanJob.creator_id == Creator.id,
-                        ScanJob.status.in_(ACTIVE_SCAN_JOB_STATUSES),
-                    )
-                    .correlate(Creator)
-                    .scalar_subquery()
-                )
+                active_job_ids = self._active_scan_job_ids()
                 rows = session.execute(
                     select(Creator, CreatorSchedule, ScanJob)
                     .outerjoin(
                         CreatorSchedule, CreatorSchedule.creator_id == Creator.id
                     )
-                    .outerjoin(ScanJob, ScanJob.id == active_job_id)
+                    .outerjoin(
+                        active_job_ids,
+                        active_job_ids.c.creator_id == Creator.id,
+                    )
+                    .outerjoin(ScanJob, ScanJob.id == active_job_ids.c.job_id)
                     .order_by(Creator.created_at.desc(), Creator.id.desc())
                     .offset((page - 1) * page_size)
                     .limit(page_size)

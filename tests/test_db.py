@@ -596,11 +596,13 @@ def test_creator_detail_includes_schedule_and_active_scan_progress(tmp_path: Pat
 
     detail = db.get_creator_detail(creator["id"])
     listed = db.list_creators()[0]
+    paged = db.list_creators_page()["items"][0]
 
     assert detail["schedule"]["schedule_type"] == "minutes"
     assert detail["active_scan_job"]["scroll_count"] == 7
     assert detail["active_scan_job"]["discovered_count"] == 42
     assert listed["active_scan_job"]["id"] == job["id"]
+    assert paged["active_scan_job"]["id"] == job["id"]
 
 
 def test_download_jobs_are_deduplicated_claimed_and_controlled(tmp_path: Path) -> None:
