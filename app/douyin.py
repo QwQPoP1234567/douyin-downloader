@@ -197,6 +197,67 @@ def image_asset_urls(item: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(result))
 
 
+def _compact_url_container(value: Any) -> dict[str, Any] | None:
+    urls = _url_list(value)
+    if not urls:
+        return None
+    result: dict[str, Any] = {"url_list": urls}
+    if isinstance(value, dict):
+        for key in ("width", "height", "data_size"):
+            if value.get(key) is not None:
+                result[key] = value[key]
+    return result
+
+
+def compact_aweme_raw(
+    *,
+    video: dict[str, Any],
+    sorted_rates: list[dict[str, Any]],
+    image_urls: list[str],
+    author: dict[str, Any],
+    is_daily: bool,
+) -> dict[str, Any]:
+    """Keep only fields required for media fallback and ownership checks."""
+    result: dict[str, Any] = {}
+    sec_uid = author.get("sec_uid") or author.get("secUid")
+    if sec_uid:
+        result["author"] = {"sec_uid": sec_uid}
+    if image_urls:
+        result["images"] = [{"url_list": [url]} for url in image_urls]
+    else:
+        compact_video: dict[str, Any] = {}
+        compact_rates = []
+        for entry in sorted_rates:
+            address = _compact_url_container(
+                entry.get("play_addr") or entry.get("playAddr")
+            )
+            if not address:
+                continue
+            compact_entry: dict[str, Any] = {"play_addr": address}
+            for source in ("FPS", "fps", "bit_rate", "bitRate"):
+                if entry.get(source) is not None:
+                    compact_entry[source] = entry[source]
+            compact_rates.append(compact_entry)
+        if compact_rates:
+            compact_video["bit_rate"] = compact_rates
+        for source in (
+            "play_addr_h264",
+            "playAddrH264",
+            "play_addr",
+            "playAddr",
+        ):
+            address = _compact_url_container(video.get(source))
+            if address:
+                compact_video[
+                    "play_addr_h264" if "h264" in source.lower() else "play_addr"
+                ] = address
+        if compact_video:
+            result["video"] = compact_video
+    if is_daily:
+        result["is_story"] = True
+    return result
+
+
 def parse_aweme(item: dict[str, Any]) -> dict[str, Any] | None:
     aweme_id = item.get("aweme_id") or item.get("awemeId") or item.get("id")
     video = item.get("video")
@@ -206,6 +267,7 @@ def parse_aweme(item: dict[str, Any]) -> dict[str, Any] | None:
     video = video if isinstance(video, dict) else {}
     bit_rates = video.get("bit_rate") or video.get("bitRate") or []
     bit_rate_urls: list[Any] = []
+    sorted_rates: list[dict[str, Any]] = []
     if isinstance(bit_rates, list):
         sorted_rates = sorted(
             (entry for entry in bit_rates if isinstance(entry, dict)),
@@ -270,7 +332,13 @@ def parse_aweme(item: dict[str, Any]) -> dict[str, Any] | None:
         "asset_count": len(images) if images else 1,
         "is_daily": is_daily,
         "image_urls": images,
-        "raw": item,
+        "raw": compact_aweme_raw(
+            video=video,
+            sorted_rates=sorted_rates,
+            image_urls=images,
+            author=author,
+            is_daily=is_daily,
+        ),
     }
 
 

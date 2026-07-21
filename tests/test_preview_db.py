@@ -42,6 +42,22 @@ def test_preview_session_batches_and_database_pagination(tmp_path: Path) -> None
     db.close()
 
 
+def test_preview_raw_json_is_bounded_before_database_insert(tmp_path: Path) -> None:
+    db = Database(tmp_path / "preview-raw-limit.db")
+    db.initialize()
+    preview = db.create_preview_session("https://v.douyin.com/raw-limit/")
+
+    db.bulk_upsert_preview_videos(
+        preview["id"],
+        [{"aweme_id": "large", "raw": {"unused": "x" * 100_000}}],
+    )
+
+    item = db.list_preview_videos(preview["token"])["items"][0]
+    stored = db.get_preview_video(preview["token"], item["id"])
+    assert stored["raw_json"] is None
+    db.close()
+
+
 def test_expired_preview_sessions_are_deleted(tmp_path: Path) -> None:
     db = Database(tmp_path / "preview-expiry.db")
     db.initialize()

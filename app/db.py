@@ -65,6 +65,18 @@ ACTIVE_SCAN_JOB_STATUSES = {"queued", "running", "pausing", "paused", "cancellin
 TERMINAL_SCAN_JOB_STATUSES = {"completed", "failed", "cancelled"}
 ACTIVE_DOWNLOAD_JOB_STATUSES = {"queued", "running", "pausing", "paused", "cancelling"}
 TERMINAL_DOWNLOAD_JOB_STATUSES = {"completed", "failed", "cancelled"}
+MAX_RAW_JSON_BYTES = 60_000
+
+
+def _bounded_json_text(value: Any) -> str | None:
+    if value in (None, {}, []):
+        return None
+    serialized = json.dumps(value, ensure_ascii=False)
+    return (
+        serialized
+        if len(serialized.encode("utf-8")) <= MAX_RAW_JSON_BYTES
+        else None
+    )
 
 
 def utc_now() -> str:
@@ -975,7 +987,6 @@ class Database:
                 now = utc_datetime()
                 values = []
                 for item in deduplicated.values():
-                    raw = item.get("raw")
                     values.append(
                         {
                             "preview_session_id": preview_session_id,
@@ -987,11 +998,7 @@ class Database:
                             "video_url": item.get("video_url") or None,
                             "content_type": item.get("content_type") or "video",
                             "asset_count": max(1, int(item.get("asset_count") or 1)),
-                            "raw_json": (
-                                json.dumps(raw, ensure_ascii=False)
-                                if raw not in (None, {}, [])
-                                else None
-                            ),
+                            "raw_json": _bounded_json_text(item.get("raw")),
                             "created_at": now,
                             "updated_at": now,
                         }
@@ -1855,10 +1862,6 @@ class Database:
     def _video_insert_values(
         creator_id: int, item: dict[str, Any], now: datetime
     ) -> dict[str, Any]:
-        raw = item.get("raw")
-        raw_json = None
-        if raw not in (None, {}, []):
-            raw_json = json.dumps(raw, ensure_ascii=False)
         return {
             "creator_id": creator_id,
             "aweme_id": str(item["aweme_id"]),
@@ -1870,7 +1873,7 @@ class Database:
             "content_type": item.get("content_type") or "video",
             "asset_count": max(1, int(item.get("asset_count") or 1)),
             "is_daily": bool(item.get("is_daily")),
-            "raw_json": raw_json,
+            "raw_json": _bounded_json_text(item.get("raw")),
             "remote_status": "active",
             "missing_count": 0,
             "last_seen_at": now,

@@ -1,5 +1,7 @@
 import asyncio
 
+import json
+
 from app.config import Settings
 from app.douyin import (
     InvalidProfileUrl,
@@ -39,6 +41,18 @@ def test_parse_aweme_prefers_high_bitrate() -> None:
     assert parsed["nickname"] == "测试用户"
     assert parsed["sec_uid"] == "MS4wLjABAAAA"
     assert parsed["avatar_url"] == "https://cdn.test/avatar.jpg"
+
+
+def test_parse_aweme_discards_unneeded_large_payload_fields() -> None:
+    aweme = sample_aweme()
+    aweme["unrelated_response_data"] = "x" * 200_000
+
+    parsed = parse_aweme(aweme)
+
+    assert parsed is not None
+    assert "unrelated_response_data" not in parsed["raw"]
+    assert len(json.dumps(parsed["raw"], ensure_ascii=False).encode("utf-8")) < 60_000
+    assert parsed["raw"]["video"]["bit_rate"][0]["play_addr"]["url_list"]
 
 
 def test_parse_aweme_prefers_resolution_before_bitrate() -> None:
