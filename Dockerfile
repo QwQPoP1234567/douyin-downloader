@@ -13,7 +13,6 @@ RUN apt-get update \
         fonts-liberation \
         fonts-noto-cjk \
         fonts-noto-color-emoji \
-        gosu \
         novnc \
         websockify \
         x11vnc \
@@ -31,10 +30,7 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN groupadd --system --gid 10001 douyin \
-    && useradd --system --uid 10001 --gid douyin --home-dir /app --shell /usr/sbin/nologin douyin \
-    && mkdir -p /app/data /app/downloads /app/browser_data \
-    && chown -R douyin:douyin /app \
+RUN mkdir -p /app/data /app/downloads /app/browser_data \
     && chmod 1777 /tmp \
     && chmod 755 /usr/local/bin/docker-entrypoint.sh
 

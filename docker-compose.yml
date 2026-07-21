@@ -61,7 +61,7 @@ services:
       DOUYIN_REQUEST_TIMEOUT_SECONDS: ${DOUYIN_REQUEST_TIMEOUT_SECONDS:-90}
       DOUYIN_LINUX_AUTO_BROWSER: "true"
       # Some NAS/container hosts prohibit Chromium namespace sandboxing.
-      # The application process itself still runs as the non-root douyin user.
+      # Docker runs the application as root for maximum host compatibility.
       DOUYIN_LINUX_CHROMIUM_NO_SANDBOX: "true"
       DOUYIN_LINUX_NOVNC_ENABLED: ${DOUYIN_LINUX_NOVNC_ENABLED:-true}
       DOUYIN_LINUX_NOVNC_MODE: ${DOUYIN_LINUX_NOVNC_MODE:-on_demand}

@@ -255,7 +255,7 @@ docker compose logs --tail=200 douyin-downloader
 ls -ld <下载目录>
 ```
 
-应用进程以非 root 用户运行。入口脚本会迁移旧版 root 容器创建的目录权限和断点临时文件权限，但宿主机挂载目录本身仍必须允许 Docker 容器访问。
+为兼容禁用 Chromium namespace 和特殊挂载权限的 NAS，应用容器默认以 root 运行。Docker 容器仍未获得 privileged 权限；请只挂载项目实际需要的数据、下载和浏览器目录，不要挂载宿主机根目录。
 
 ### 12.4 管理页面可打开，但显示未登录
 
