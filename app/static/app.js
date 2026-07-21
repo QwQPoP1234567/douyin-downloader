@@ -17,8 +17,6 @@ const routes = new Set(["dashboard", "add", "creators", "videos", "pending", "do
 let currentRoute = "dashboard";
 let refreshInFlight = false;
 let refreshTimer = null;
-let activeRequestCount = 0;
-let requestFeedbackTimer = null;
 const creatorState = {page: 1, pageSize: 20, totalPages: 0, editingId: null, hasActiveJobs: false};
 const videoLibraryState = {page: 1, pageSize: 30, totalPages: 0, items: [], selected: new Set(), creatorId: null};
 const pendingState = {page: 1, pageSize: 30, totalPages: 0, items: [], selected: new Set(), creatorId: null};
@@ -123,16 +121,6 @@ function toast(message) {
 }
 
 async function api(path, options = {}) {
-  activeRequestCount++;
-  clearTimeout(requestFeedbackTimer);
-  requestFeedbackTimer = setTimeout(() => {
-    if (activeRequestCount > 0) {
-      $("#requestFeedback").classList.remove("error");
-      $("#requestFeedbackText").textContent = "正在加载…";
-      $("#requestRetry").hidden = true;
-      $("#requestFeedback").hidden = false;
-    }
-  }, 180);
   try {
     const response = await fetch(path, {
       headers: {"Content-Type": "application/json", ...(options.headers || {})},
@@ -150,12 +138,6 @@ async function api(path, options = {}) {
     $("#requestRetry").hidden = false;
     $("#requestFeedback").hidden = false;
     throw error;
-  } finally {
-    activeRequestCount--;
-    if (activeRequestCount === 0) {
-      clearTimeout(requestFeedbackTimer);
-      if (!$("#requestFeedback").classList.contains("error")) $("#requestFeedback").hidden = true;
-    }
   }
 }
 
