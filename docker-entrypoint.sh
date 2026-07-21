@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+# Xvfb runs as the unprivileged application user, but X11 requires this
+# shared socket directory to be created and owned by root first.
+mkdir -p /tmp/.X11-unix
+chown root:root /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
+
 for directory in /app/data /app/downloads /app/browser_data; do
     mkdir -p "$directory"
     chown douyin:douyin "$directory"
