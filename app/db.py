@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import math
+import random
 import secrets
 import threading
 from contextlib import contextmanager
@@ -62,6 +63,7 @@ DATETIME_FIELDS = {
 }
 
 ACTIVE_SCAN_JOB_STATUSES = {"queued", "running", "pausing", "paused", "cancelling"}
+TERMINAL_SCAN_JOB_STATUSES = {"completed", "failed", "cancelled"}
 TERMINAL_SCAN_JOB_STATUSES = {"completed", "failed", "cancelled"}
 ACTIVE_DOWNLOAD_JOB_STATUSES = {"queued", "running", "pausing", "paused", "cancelling"}
 TERMINAL_DOWNLOAD_JOB_STATUSES = {"completed", "failed", "cancelled"}
@@ -582,6 +584,9 @@ class Database:
                 if schedule is None or creator is None:
                     raise KeyError(f"Schedule for creator {creator_id} not found")
                 schedule.last_run_at = run_time.astimezone(timezone.utc).replace(tzinfo=None)
+                # 抖动取 [0, jitter_seconds] 内的随机值：固定偏移只是整体延后，
+                # 无法把同一时刻创建的一批主播错开，崩溃恢复后仍会同时到期。
+                jitter_window = max(0, int(schedule.jitter_seconds or 0))
                 schedule.next_run_at = (
                     calculate_next_run(
                         schedule_type=schedule.schedule_type,
@@ -589,7 +594,7 @@ class Database:
                         daily_time=schedule.daily_time,
                         timezone_name=schedule.timezone,
                         after=run_time,
-                        jitter_seconds=schedule.jitter_seconds,
+                        jitter_seconds=random.randint(0, jitter_window) if jitter_window else 0,
                     )
                     if schedule.enabled and creator.enabled
                     else None
@@ -1546,6 +1551,64 @@ class Database:
                 for preview in previews:
                     session.delete(preview)
                 return count
+
+        return self._run(operation)
+
+    def prune_history(
+        self,
+        *,
+        log_retention_days: int = 30,
+        log_max_rows: int = 200_000,
+        job_retention_days: int = 30,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """清理过期事件日志与已结束的扫描任务记录。
+
+        这两张表随运行时长无上限增长：``add_log`` 几乎每个动作都会写一行，
+        ``scan_jobs`` 每个主播每次扫描写一行。7×24 跑几个月后它们会把 NAS 上
+        的 MySQL 卷撑爆，也会拖慢管理页的列表查询。
+        ``download_jobs`` 受 ``video_id`` 唯一约束限制，行数有界，且是重复下载
+        判定的依据，这里刻意不动。
+        """
+        current = now or utc_datetime()
+        if current.tzinfo is not None:
+            current = current.astimezone(timezone.utc).replace(tzinfo=None)
+
+        def operation() -> dict[str, int]:
+            removed = {"event_logs": 0, "scan_jobs": 0}
+            with self.session() as session:
+                if log_retention_days > 0:
+                    cutoff = current - timedelta(days=log_retention_days)
+                    removed["event_logs"] += int(
+                        session.query(EventLog)
+                        .filter(EventLog.created_at < cutoff)
+                        .delete(synchronize_session=False)
+                    )
+                if log_max_rows > 0:
+                    # 再按行数兜底：日志暴涨时不能只靠时间窗口。
+                    threshold = session.scalar(
+                        select(EventLog.id)
+                        .order_by(EventLog.id.desc())
+                        .offset(max(0, log_max_rows - 1))
+                        .limit(1)
+                    )
+                    if threshold is not None:
+                        removed["event_logs"] += int(
+                            session.query(EventLog)
+                            .filter(EventLog.id < threshold)
+                            .delete(synchronize_session=False)
+                        )
+                if job_retention_days > 0:
+                    cutoff = current - timedelta(days=job_retention_days)
+                    removed["scan_jobs"] = int(
+                        session.query(ScanJob)
+                        .filter(
+                            ScanJob.status.in_(TERMINAL_SCAN_JOB_STATUSES),
+                            ScanJob.updated_at < cutoff,
+                        )
+                        .delete(synchronize_session=False)
+                    )
+            return removed
 
         return self._run(operation)
 

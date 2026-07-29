@@ -5,6 +5,13 @@ from app.db import Database
 from app.scheduling import calculate_next_run
 
 
+def _utc_naive(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def test_daily_schedule_uses_asia_shanghai_and_jitter() -> None:
     after = datetime(2026, 7, 20, 7, 0, tzinfo=timezone.utc)
 
@@ -66,9 +73,40 @@ def test_creator_schedule_is_persisted_recalculated_and_disabled(tmp_path: Path)
         creator["id"], run_at=datetime(2026, 7, 21, 6, 0, 15, tzinfo=timezone.utc)
     )
     assert recorded["last_run_at"].startswith("2026-07-21T06:00:15")
-    assert recorded["next_run_at"].startswith("2026-07-22T06:00:15")
+    # 重新排程时抖动取 [0, jitter_seconds] 内的随机值，用来把同时到期的一批主播错开。
+    next_run = _utc_naive(recorded["next_run_at"])
+    assert datetime(2026, 7, 22, 6, 0, 0) <= next_run <= datetime(2026, 7, 22, 6, 0, 15)
 
     disabled = db.set_creator_schedule_enabled(creator["id"], False, after=after)
     assert disabled["enabled"] is False
     assert disabled["next_run_at"] is None
+    db.close()
+
+
+def test_rescheduling_spreads_creators_across_the_jitter_window(tmp_path: Path) -> None:
+    """固定抖动只是整体延后，崩溃恢复后所有主播仍会同时到期，必须是随机的。"""
+    db = Database(tmp_path / "jitter.db")
+    db.initialize()
+    creator = db.add_creator("https://www.douyin.com/user/jitter", 60)
+    after = datetime(2026, 7, 20, 7, 0, tzinfo=timezone.utc)
+    db.update_creator_schedule(
+        creator["id"],
+        schedule_type="hours",
+        interval_value=1,
+        daily_time=None,
+        timezone_name="Asia/Shanghai",
+        jitter_seconds=120,
+        after=after,
+    )
+
+    run_at = datetime(2026, 7, 21, 6, 0, tzinfo=timezone.utc)
+    observed = {
+        db.record_creator_schedule_run(creator["id"], run_at=run_at)["next_run_at"]
+        for _ in range(20)
+    }
+
+    assert len(observed) > 1
+    for value in observed:
+        next_run = _utc_naive(value)
+        assert datetime(2026, 7, 21, 7, 0, 0) <= next_run <= datetime(2026, 7, 21, 7, 2, 0)
     db.close()

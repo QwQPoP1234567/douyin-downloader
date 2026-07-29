@@ -28,7 +28,11 @@ Windows：打开管理页并查看“运行日志”，或在启动 PowerShell �
 - APScheduler 是否运行；
 - 配置外部 CDP 时，CDP TCP 端口是否可连接。
 
+返回体里的 `browser_runtime` 反映看门狗状态：`ready` 表示 Xvfb 与 Chromium 都活着，`restart_count` 是本次容器运行内自动恢复的次数，`last_error` 是最近一次恢复失败的原因。CDP 不可用时接口返回 503，`detail` 会带上已自动恢复的次数，不用去翻容器日志。
+
 Docker 状态从 `health: starting` 变成 `healthy` 可能需要几十秒，因为镜像给浏览器启动预留了 45 秒。
+
+注意：Docker 不会因为 `unhealthy` 重启容器（那是 Swarm 的行为）。浏览器挂掉时容器会一直显示 `unhealthy`，同时进程内的看门狗按 10 秒到 5 分钟的退避持续拉起 Xvfb/Chromium——这是刻意设计，用容器存活换取管理页可访问，而不是让容器崩溃循环。
 
 ## 3. 常见问题
 
@@ -45,7 +49,34 @@ docker compose up -d --build
 
 不需要删除 `browser_data`。
 
-### 3.2 容器反复重启
+### 3.2 `Server is already active for display 99` 导致的崩溃循环
+
+症状：容器反复重启，`data/linux-runtime.log` 尾部出现
+
+```
+(EE) Fatal server error:
+(EE) Server is already active for display 99
+   If this server is no longer running, remove /tmp/.X99-lock and start again.
+```
+
+紧接着 Chromium 报 `Missing X server or $DISPLAY` 并以退出码 1 结束。
+
+成因：`restart: unless-stopped` 重启的是同一个容器，可写层里的 `/tmp` 不会重置，上次运行留下的 `/tmp/.X99-lock` 依旧存在。X 服务器靠锁文件里记录的 PID 做 `kill(pid, 0)` 存活探测，而容器重启后 PID 从头分配，那个号码几乎必然被新进程占用，于是 X 误判 display 仍被占用，直接退出——每次重启都撞同一个坑，形成永久循环。
+
+当前版本从三个层面阻断：
+
+1. `docker-entrypoint.sh` 在容器启动时清掉所有残留 X 锁（新容器不可能有活的 X 服务，残留锁必然陈旧）；
+2. `app/linux_runtime.py` 启动前真正去连一次 X 套接字，确认无人应答才删锁，有活的 X 服务则直接复用；
+3. `docker-compose.yml` 把 `/tmp` 挂成 tmpfs，从根上让 `/tmp` 每次启动都是干净的。
+
+旧版本的临时处置（新版本不再需要）：
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+### 3.3 容器反复重启
 
 先不要反复执行删除 Profile 的命令，先查看：
 
@@ -67,7 +98,7 @@ tail -n 200 data/linux-runtime.log
 - `browser_data` 在另一容器或 Chrome 进程中使用；
 - VNC 对外监听但没有配置密码。
 
-### 3.3 `SingletonLock` 或 Profile 正在使用
+### 3.4 `SingletonLock` 或 Profile 正在使用
 
 Linux 自动运行时只会清理以下进程级临时文件，不会删除 Cookie：
 
@@ -80,7 +111,7 @@ DevToolsActivePort
 
 只有确认没有任何 Chrome/容器正在使用该 Profile 时才可手动清理。不要删除整个 `browser_data`。
 
-### 3.4 `docker inspect` 提示容器不存在
+### 3.5 `docker inspect` 提示容器不存在
 
 执行 `docker compose down` 后，容器对象已经删除，无法再 inspect。挂载位置应直接从 `.env` 读取：
 
@@ -94,7 +125,7 @@ grep '^DOUYIN_.*_PATH=' .env
 docker inspect douyin-downloader --format '{{json .Mounts}}'
 ```
 
-### 3.5 主页作品获取不全
+### 3.6 主页作品获取不全
 
 程序不会仅凭 DOM 滚动停止判断扫描完整。完整扫描需要主页接口明确返回 `has_more=0`，并结合主页显示数量进行判断。
 
@@ -108,7 +139,7 @@ docker inspect douyin-downloader --format '{{json .Mounts}}'
 
 不完整扫描不会用于判断作品删除或私密，避免误标记。
 
-### 3.6 验证码
+### 3.7 验证码
 
 出现验证码后：
 
@@ -120,7 +151,7 @@ docker inspect douyin-downloader --format '{{json .Mounts}}'
 
 程序不会自动识别、破解或跳过验证码。
 
-### 3.7 noVNC CPU 较高
+### 3.8 noVNC CPU 较高
 
 首次登录完成后可关闭 noVNC：
 
@@ -130,7 +161,7 @@ DOUYIN_LINUX_NOVNC_ENABLED=false
 
 然后重建/重启容器。需要处理验证码时重新启用。当前 `on_demand` 和空闲秒数只是预留项，不会自动关闭 x11vnc/noVNC。
 
-### 3.8 下载失败或媒体地址过期
+### 3.9 下载失败或媒体地址过期
 
 下载器会：
 
@@ -142,11 +173,11 @@ DOUYIN_LINUX_NOVNC_ENABLED=false
 
 可以在管理页对单条失败记录点击重试。
 
-### 3.9 已删除或私密内容
+### 3.10 已删除或私密内容
 
 连续两次完整扫描均未发现某作品后，`remote_status` 才变为 `removed_or_private`。本地已下载文件不会删除，管理页显示“已删除或私密但已下载”。
 
-### 3.10 管理页下载目录无法修改
+### 3.11 管理页下载目录无法修改
 
 Docker Compose 设置了 `DOUYIN_DOWNLOAD_DIR=/app/downloads`，因此 WebUI 会锁定下载目录。请修改宿主挂载：
 

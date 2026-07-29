@@ -9,7 +9,7 @@ import socket
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.config import Settings
 from app.db import Database, utc_now
@@ -45,6 +45,20 @@ class SubscriptionService:
         self._download_tasks: list[asyncio.Task[None]] = []
         self._download_stopping = asyncio.Event()
         self._download_wakeup = asyncio.Event()
+        self._runtime_probe: Callable[[], bool] | None = None
+
+    def set_runtime_probe(self, probe: Callable[[], bool] | None) -> None:
+        """注入浏览器运行时就绪探针，浏览器没起来时不要空转派发扫描。"""
+        self._runtime_probe = probe
+
+    def browser_runtime_ready(self) -> bool:
+        probe = self._runtime_probe
+        if probe is None:
+            return True
+        try:
+            return bool(probe())
+        except Exception:
+            return True
 
     async def start(self) -> None:
         if any(not task.done() for task in self._download_tasks):
@@ -349,6 +363,20 @@ class SubscriptionService:
     def active_scan_count(self) -> int:
         return sum(1 for task in self._tasks.values() if not task.done())
 
+    def active_preview_scan_count(self) -> int:
+        return sum(1 for task in self._preview_tasks.values() if not task.done())
+
+    def available_scan_slots(self) -> int:
+        """后台派发扫描的剩余额度。
+
+        浏览器只有一个扫描页锁，一次性把上百个主播全部 create_task 出去并不会更快：
+        它们只会一起把扫描任务标成 running、把主播标成 scanning，然后全部堵在锁上。
+        这里改成按额度逐批派发，剩下的继续留在队列里，由 30 秒一次的轮询接手。
+        """
+        limit = max(1, int(self.settings.scan_concurrency))
+        used = self.active_scan_count() + self.active_preview_scan_count()
+        return max(0, limit - used)
+
     def _prepare_scan_job(
         self,
         creator_id: int,
@@ -425,15 +453,27 @@ class SubscriptionService:
         return True
 
     async def resume_pending_scan_jobs(self) -> None:
-        jobs = self.db.list_scan_jobs(statuses={"queued"}, limit=1000)
+        """只恢复并发额度内的排队任务，其余留在队列里由调度轮询逐步接手。"""
+        self._resume_queued_scan_jobs(self.available_scan_slots())
+
+    def _resume_queued_scan_jobs(self, slots: int) -> int:
+        """按额度拉起排队中的扫描任务，返回剩余额度。"""
+        if slots <= 0:
+            return 0
+        jobs = self.db.list_scan_jobs(statuses={"queued"}, limit=max(slots * 5, 20))
         for job in jobs:
+            if slots <= 0:
+                break
             creator_id = job.get("creator_id")
             if creator_id is not None:
-                self.start_scan(int(creator_id), job_id=int(job["id"]))
+                if self.start_scan(int(creator_id), job_id=int(job["id"])):
+                    slots -= 1
             elif job.get("preview_session_id") is not None:
-                self.start_preview_scan(
+                if self.start_preview_scan(
                     int(job["preview_session_id"]), job_id=int(job["id"])
-                )
+                ):
+                    slots -= 1
+        return slots
 
     def preview_task_running(self, preview_session_id: int) -> bool:
         task = self._preview_tasks.get(preview_session_id)
@@ -646,11 +686,40 @@ class SubscriptionService:
 
     async def scan_due_creators(self) -> None:
         self.db.cleanup_expired_preview_sessions()
-        due = self.db.list_due_creator_schedules(limit=1000)
+        if not self.browser_runtime_ready():
+            # 浏览器还没拉起来就派发，只会把到期任务批量判失败并触发重试风暴。
+            return
+        slots = self._resume_queued_scan_jobs(self.available_scan_slots())
+        if slots <= 0:
+            return
+        due = self.db.list_due_creator_schedules(limit=max(slots * 5, 20))
         for schedule in due:
+            if slots <= 0:
+                break
             if schedule.get("creator_status") in {"scanning", "needs_verification"}:
                 continue
-            self.start_scan(int(schedule["creator_id"]), advance_schedule=True)
+            if self.start_scan(int(schedule["creator_id"]), advance_schedule=True):
+                slots -= 1
+
+    async def run_retention_sweep(self) -> None:
+        """定期清理历史数据，让 7×24 运行不至于被日志和任务记录压垮。"""
+        try:
+            removed = self.db.prune_history(
+                log_retention_days=int(self.settings.log_retention_days),
+                log_max_rows=int(self.settings.log_max_rows),
+                job_retention_days=int(self.settings.scan_job_retention_days),
+            )
+        except Exception as exc:
+            self.db.add_log("error", f"历史数据清理失败：{exc}")
+            return
+        total = sum(removed.values())
+        if total:
+            self.db.add_log(
+                "info",
+                "历史数据清理完成："
+                f"事件日志 {removed.get('event_logs', 0)} 条，"
+                f"扫描任务 {removed.get('scan_jobs', 0)} 条",
+            )
 
     async def scan_creator(self, creator_id: int, job_id: int | None = None) -> None:
         job = self._prepare_scan_job(creator_id, job_id=job_id)

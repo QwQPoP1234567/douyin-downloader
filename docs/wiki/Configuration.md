@@ -41,6 +41,12 @@
 | `DOUYIN_LINUX_VNC_PASSWORD` | 空 | 非本机监听时必填 |
 | `DOUYIN_LINUX_VNC_POLL_MS` | `80` | x11vnc 屏幕轮询间隔 |
 | `DOUYIN_LINUX_VNC_DEFER_MS` | `80` | x11vnc 更新延迟 |
+| `DOUYIN_LINUX_RUNTIME_START_TIMEOUT_SECONDS` | `60` | 等待 X 服务与 Chrome CDP 就绪的超时，NAS 磁盘慢时可调大 |
+| `DOUYIN_LINUX_RUNTIME_SUPERVISE` | `true` | 后台看门狗：Xvfb/Chromium 退出后自动拉起 |
+| `DOUYIN_LINUX_RUNTIME_SUPERVISE_SECONDS` | `10` | 看门狗检查间隔 |
+| `DOUYIN_LINUX_RUNTIME_MAX_BACKOFF_SECONDS` | `300` | 反复恢复失败时的退避上限 |
+| `DOUYIN_LINUX_RUNTIME_LOG_MAX_BYTES` | `8388608` | `data/linux-runtime.log` 超过该大小就地截断，0 表示不限制 |
+| `DOUYIN_LINUX_CHROMIUM_DISK_CACHE_MB` | `128` | Chromium 磁盘/媒体缓存上限，防止 `browser_data` 无限增长 |
 
 ## 4. 扫描与下载
 
@@ -48,6 +54,7 @@
 | --- | --- | --- |
 | `DOUYIN_DEFAULT_INTERVAL_MINUTES` | `60` | 新用户默认检查间隔 |
 | `DOUYIN_SCAN_POLL_SECONDS` | `30` | 调度器检查到期用户的频率 |
+| `DOUYIN_SCAN_CONCURRENCY` | `1` | 同时进行的后台扫描数上限，代码限制 1 到 3。浏览器只有一把扫描页锁，调大只会让任务堆在锁上一起超时；到期但派发不出去的用户会留在队列里，由下一轮轮询接手 |
 | `DOUYIN_SCAN_SCROLL_WAIT_MS` | `1300` | 每次滚动后等待时间基数 |
 | `DOUYIN_SCAN_STABLE_ROUNDS` | `7` | DOM/分页稳定判断轮数 |
 | `DOUYIN_MAX_SCAN_SCROLLS` | `1000` | 单次扫描最大滚动次数 |
@@ -57,7 +64,22 @@
 
 过短的扫描间隔会提高验证码和风控概率。API 对单用户间隔限制为 5 到 10080 分钟。
 
-## 5. 钉钉
+每次重新排程时，抖动取 `[0, jitter_seconds]` 内的随机值而不是固定偏移，否则同一批创建的用户会永远同时到期；容器崩溃恢复后，所有过期用户也会由 `DOUYIN_SCAN_CONCURRENCY` 逐批消化，不会一起涌向浏览器。
+
+## 5. 历史数据保留
+
+事件日志和扫描任务记录随运行时长无上限增长，7×24 跑几个月会撑爆数据库卷并拖慢管理页列表。调度器按固定周期回收：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DOUYIN_RETENTION_SWEEP_HOURS` | `6` | 回收任务的执行间隔 |
+| `DOUYIN_LOG_RETENTION_DAYS` | `30` | 事件日志保留天数，0 表示不按时间清理 |
+| `DOUYIN_LOG_MAX_ROWS` | `200000` | 事件日志行数上限兜底，0 表示不限制 |
+| `DOUYIN_SCAN_JOB_RETENTION_DAYS` | `30` | 已结束（完成/失败/取消）扫描任务的保留天数，0 表示不清理 |
+
+`download_jobs` 受 `video_id` 唯一约束限制，行数有界且是重复下载判定的依据，不参与回收。
+
+## 6. 钉钉
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -67,7 +89,7 @@
 
 WebUI 中保存的钉钉设置写入 SQLite，并优先于环境变量。API 只返回脱敏 Webhook，不返回 secret。
 
-## 6. Docker Compose 专用变量
+## 7. Docker Compose 专用变量
 
 以下变量主要用于 Compose 插值，不是 `Settings` 字段：
 
@@ -80,6 +102,9 @@ WebUI 中保存的钉钉设置写入 SQLite，并优先于环境变量。API 只
 | `DOUYIN_WEB_PORT` | `8765` | 宿主管理页端口 |
 | `DOUYIN_NOVNC_PORT` | `6080` | 宿主 noVNC 端口 |
 | `DOUYIN_VNC_PASSWORD` | 必填 | Compose 传给容器内 VNC 密码配置 |
+| `DOUYIN_TMPFS_SIZE` | `256m` | 容器 `/tmp` 的 tmpfs 大小。`/tmp` 必须是 tmpfs，否则 X11 锁会跨重启存活并让 Xvfb 误判 display 被占用 |
+| `DOUYIN_LOG_MAX_SIZE` | `10m` | 单个容器日志文件上限 |
+| `DOUYIN_LOG_MAX_FILE` | `3` | 容器日志文件保留个数 |
 
 注意：Compose 的 `.env` 首先用于 YAML 插值。只有 `docker-compose.yml` 的 `environment:` 中列出的值才会传入容器。若要在 Docker 中增加新的 `DOUYIN_*` 设置，需要同时更新 Compose 的 `environment:`，或显式增加 `env_file`。
 

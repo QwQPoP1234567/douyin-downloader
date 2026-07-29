@@ -34,14 +34,28 @@ class Settings(BaseSettings):
     linux_vnc_password: str | None = None
     linux_vnc_poll_ms: int = 80
     linux_vnc_defer_ms: int = 80
+    # 浏览器运行时的启动、守护与自愈参数（NAS 上磁盘慢，超时给足）。
+    linux_runtime_start_timeout_seconds: int = Field(default=60, ge=5, le=600)
+    linux_runtime_supervise: bool = True
+    linux_runtime_supervise_seconds: int = Field(default=10, ge=1, le=300)
+    linux_runtime_max_backoff_seconds: int = Field(default=300, ge=5, le=3600)
+    linux_runtime_log_max_bytes: int = Field(default=8 * 1024 * 1024, ge=0)
+    linux_chromium_disk_cache_mb: int = Field(default=128, ge=1, le=4096)
     default_interval_minutes: int = 60
     scan_poll_seconds: int = 30
+    # 浏览器只有一个扫描页锁，同时派发再多也只是排队，反而让所有主播一起卡住。
+    scan_concurrency: int = Field(default=1, ge=1, le=3)
     scan_scroll_wait_ms: int = 1300
     scan_stable_rounds: int = 7
     scan_batch_size: int = 30
     scan_no_progress_seconds: int = 90
     scan_continue_limit: int = 100
     preview_session_ttl_minutes: int = Field(default=120, ge=15, le=1440)
+    # 7×24 运行下事件日志和扫描任务记录会无限增长，需要定期回收。
+    retention_sweep_hours: int = Field(default=6, ge=1, le=168)
+    log_retention_days: int = Field(default=30, ge=0, le=3650)
+    log_max_rows: int = Field(default=200_000, ge=0)
+    scan_job_retention_days: int = Field(default=30, ge=0, le=3650)
     max_scan_scrolls: int = 1000
     scan_max_runtime_seconds: int = 900
     schedule_jitter_ratio: float = 0.1

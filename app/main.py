@@ -20,6 +20,7 @@ from app.cover_cache import CoverCache
 from app.db import Database
 from app.douyin import DouyinScanner, InvalidProfileUrl, validate_profile_url
 from app.downloader import VideoDownloader
+from app.linux_runtime import active_runtime, browser_runtime_ready
 from app.media import MediaPathError, inline_file_response, inline_image_response, list_local_images, resolve_download_path
 from app.notifier import DingTalkConfigError, DingTalkNotifier
 from app.schemas import (
@@ -68,6 +69,7 @@ async def lifespan(_: FastAPI):
         settings.download_dir = Path(configured_download_dir)
         settings.download_dir.mkdir(parents=True, exist_ok=True)
     await service.start()
+    service.set_runtime_probe(browser_runtime_ready)
     scheduler.add_job(
         service.scan_due_creators,
         "interval",
@@ -75,6 +77,16 @@ async def lifespan(_: FastAPI):
         id="scan-due-creators",
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=settings.scan_poll_seconds,
+    )
+    scheduler.add_job(
+        service.run_retention_sweep,
+        "interval",
+        hours=settings.retention_sweep_hours,
+        id="retention-sweep",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
     )
     scheduler.start()
     await service.resume_pending_scan_jobs()
@@ -106,6 +118,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/api/health", include_in_schema=False)
 async def health() -> dict:
     db.fetch_one("SELECT 1 AS ok")
+    runtime = active_runtime()
     cdp_ok = True
     if settings.browser_cdp_url:
         parsed = urlparse(settings.browser_cdp_url)
@@ -119,11 +132,18 @@ async def health() -> dict:
         except (OSError, asyncio.TimeoutError):
             cdp_ok = False
     if not cdp_ok:
-        raise HTTPException(status_code=503, detail="Chrome CDP 不可用")
+        detail = "Chrome CDP 不可用"
+        if runtime is not None:
+            # 看门狗正在退避重试，把进度暴露出来，运维不用去翻容器日志。
+            detail += f"（已自动恢复 {runtime.restart_count} 次）"
+            if runtime.last_error:
+                detail += f"：{runtime.last_error}"
+        raise HTTPException(status_code=503, detail=detail)
     return {
         "ok": True,
         "scheduler_running": scheduler.running,
         "browser_cdp_ok": cdp_ok,
+        "browser_runtime": runtime.status() if runtime is not None else None,
     }
 
 
@@ -157,12 +177,15 @@ async def api_status() -> dict:
             asyncio.create_task(notify_login_verification())
     else:
         login_verification_notified = False
+    runtime = active_runtime()
     return {
         **login,
         "app_name": settings.app_name,
         "download_dir": str(settings.download_dir),
         "creator_count": db.count_creators(),
         "active_scans": service.active_scan_count(),
+        "scan_concurrency": settings.scan_concurrency,
+        "browser_runtime": runtime.status() if runtime is not None else None,
     }
 
 

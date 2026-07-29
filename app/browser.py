@@ -32,15 +32,56 @@ class BrowserManager:
         self._login_page: Page | None = None
         self._anchor_page: Page | None = None
         self._user_agent_cache: str | None = None
+        self._connection_lost = False
 
     @property
     def running(self) -> bool:
         return self._context is not None
 
+    def _mark_connection_lost(self, *_: Any) -> None:
+        self._connection_lost = True
+
+    def _connection_alive(self) -> bool:
+        if self._context is None or self._connection_lost:
+            return False
+        if self._browser is not None:
+            try:
+                return bool(self._browser.is_connected())
+            except Exception:
+                return False
+        return True
+
+    async def _discard_connection(self) -> None:
+        """Chrome 被看门狗重启或自行崩溃后，丢弃失效连接并复位全部页面状态。"""
+        self._context = None
+        self._browser = None
+        self._owns_context = True
+        self._connection_lost = False
+        self._managed_pages.clear()
+        self._scan_pages.clear()
+        # 扫描页锁只在 page 的 close 事件里释放；连接断开时这个事件不会到达，
+        # 不主动复位就会让之后所有扫描永久阻塞在 new_scan_page()。
+        if self._scan_page_lock.locked():
+            self._scan_page_lock.release()
+        self._retained_pages.clear()
+        self._login_page = None
+        self._anchor_page = None
+        self._user_agent_cache = None
+        self._profile_api_verified = False
+        if self._playwright is not None:
+            try:
+                await self._playwright.stop()
+            except Exception:
+                pass
+            self._playwright = None
+
     async def start(self) -> BrowserContext:
         async with self._start_lock:
-            if self._context is not None:
-                return self._context
+            context = self._context
+            if context is not None and self._connection_alive():
+                return context
+            if context is not None or self._playwright is not None:
+                await self._discard_connection()
             self.settings.browser_data_dir.mkdir(parents=True, exist_ok=True)
             if self._playwright is not None:
                 await self._playwright.stop()
@@ -69,6 +110,8 @@ class BrowserManager:
                     raise RuntimeError("远程 Chrome 没有可用的默认浏览器上下文")
                 self._context = self._browser.contexts[0]
                 self._owns_context = False
+                self._connection_lost = False
+                self._browser.on("disconnected", self._mark_connection_lost)
                 self._context.on("response", self._on_context_response)
                 await self._ensure_anchor_page()
                 await self.close_unused_pages()
@@ -104,7 +147,9 @@ class BrowserManager:
                     self._playwright = None
                     raise
             self._context.on("response", self._on_context_response)
+            self._context.on("close", self._mark_connection_lost)
             self._owns_context = True
+            self._connection_lost = False
             # A persistent Chromium context must keep at least one target alive.
             # Reuse the initial about:blank page as an anchor before the generic
             # cleanup runs; closing that last page makes Chrome exit while the
@@ -389,6 +434,7 @@ class BrowserManager:
         self._anchor_page = None
         self._user_agent_cache = None
         self._browser = None
+        self._connection_lost = False
         if self._playwright is not None:
             await self._playwright.stop()
             self._playwright = None
