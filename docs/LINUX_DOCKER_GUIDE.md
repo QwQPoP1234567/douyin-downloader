@@ -138,7 +138,18 @@ http://<服务器IP>:8765
 http://<服务器IP>:8765/api/health
 ```
 
-正常时返回包含 `"ok": true` 的 JSON。
+正常时返回包含 `"ok": true` 的 JSON，其中 `browser_runtime` 反映浏览器看门狗状态：
+
+```json
+{
+  "ok": true,
+  "scheduler_running": true,
+  "browser_cdp_ok": true,
+  "browser_runtime": {"ready": true, "generation": 1, "restart_count": 0, "last_error": null}
+}
+```
+
+`restart_count` 是本次容器运行内 Xvfb/Chromium 被自动拉起的次数。浏览器不可用时接口返回 503，容器会显示 `unhealthy` 但**不会**被 Docker 重启——进程内看门狗会按 10 秒到 5 分钟的退避持续重试，管理页保持可访问。
 
 ## 7. 首次扫码登录
 
@@ -182,6 +193,8 @@ MySQL 的 3306 端口没有映射到宿主机，不需要对外开放。
 git pull
 docker compose up -d --build
 ```
+
+必须用 `docker compose up -d` 重建容器，`docker compose restart` 不行：`tmpfs` 和 `logging` 是创建容器时才生效的参数，仅重启不会应用。
 
 容器收到停止信号后会停止领取新任务，并等待当前任务和数据库操作退出。Compose 为应用保留两分钟优雅退出时间。
 
