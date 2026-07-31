@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.config import Settings
 from app.db import Database
-from app.douyin import ScanResult
+from app.douyin import ScanResult, VerificationRequired
 from app.linux_runtime import LinuxRuntime
 from app.service import SubscriptionService
 
@@ -309,6 +309,145 @@ def test_shutdown_waits_for_downloads_that_finish_inside_the_grace_period(
 
         assert finished is True
         assert not task.cancelled()
+
+    asyncio.run(run())
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# 安全验证保持状态
+# ---------------------------------------------------------------------------
+
+
+class VerificationScanner:
+    """撞上验证码的扫描器，同时记录被要求扫描了几次。"""
+
+    def __init__(self, browser=None) -> None:
+        self.started = 0
+        self.browser = browser
+
+    async def scan_profile(self, *_args, **_kwargs):
+        self.started += 1
+        raise VerificationRequired("抖音要求人工完成安全验证")
+
+    async def resolve_video(self, *_args, **_kwargs):
+        return None
+
+
+class FakeVerificationBrowser:
+    def __init__(self, blocked: bool = True) -> None:
+        self.blocked = blocked
+        self.closed_extras = 0
+        self.new_pages = 0
+
+    async def has_pending_verification(self) -> bool:
+        return self.blocked
+
+    async def close_extra_verification_pages(self, keep: int = 1) -> int:
+        self.closed_extras += 1
+        return 0
+
+    async def new_scan_page(self):
+        self.new_pages += 1
+        raise AssertionError("验证保持期间不应该再新开页面")
+
+
+def test_verification_hold_stops_every_creator_not_just_the_one_that_hit_it(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "verification.db")
+    db.initialize()
+    creator_ids = _due_creators(db, 5)
+    settings = _settings(tmp_path)
+    browser = FakeVerificationBrowser()
+    scanner = VerificationScanner(browser)
+    service = SubscriptionService(
+        db, scanner, NoopDownloader(), settings, NoopNotifier()
+    )  # type: ignore[arg-type]
+
+    async def run() -> None:
+        await service.scan_due_creators()
+        await asyncio.gather(*list(service._tasks.values()), return_exceptions=True)
+        assert service.verification_hold_active() is True
+
+        # 后续每一轮轮询都不得再派发，否则又会开出新的验证页面。
+        for _ in range(3):
+            await service.scan_due_creators()
+        assert service.active_scan_count() == 0
+
+    asyncio.run(run())
+
+    assert scanner.started == 1
+    assert browser.new_pages == 0
+    # 只有撞上的那个主播被标记，其余保持原状，但谁都没有被再次派发。
+    marked = [
+        creator_id
+        for creator_id in creator_ids
+        if db.get_creator(creator_id)["status"] == "needs_verification"
+    ]
+    assert len(marked) == 1
+    db.close()
+
+
+def test_verification_hold_is_released_once_the_page_is_cleared(tmp_path: Path) -> None:
+    db = Database(tmp_path / "verification-release.db")
+    db.initialize()
+    settings = _settings(tmp_path)
+    browser = FakeVerificationBrowser()
+    service = SubscriptionService(
+        db, VerificationScanner(browser), NoopDownloader(), settings, NoopNotifier()
+    )  # type: ignore[arg-type]
+
+    async def run() -> None:
+        service.engage_verification_hold("测试验证")
+        assert service.verification_hold_active() is True
+
+        # 人工还没处理：强制复查仍然保持，并清理重复验证页。
+        state = await service.recheck_verification(force=True)
+        assert state["active"] is True
+        assert browser.closed_extras == 1
+
+        # 人工完成后再点一次，立刻恢复。
+        browser.blocked = False
+        state = await service.recheck_verification(force=True)
+        assert state["active"] is False
+        assert service.verification_hold_active() is False
+
+    asyncio.run(run())
+    db.close()
+
+
+def test_verification_hold_survives_restart_and_only_rechecks_hourly(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "verification-persist.db")
+    db.initialize()
+    settings = _settings(tmp_path, verification_recheck_seconds=3600)
+    browser = FakeVerificationBrowser()
+    service = SubscriptionService(
+        db, VerificationScanner(browser), NoopDownloader(), settings, NoopNotifier()
+    )  # type: ignore[arg-type]
+    service.engage_verification_hold("重启前命中的验证")
+
+    # 模拟进程重启：新的 service 实例从数据库恢复保持状态。
+    revived = SubscriptionService(
+        db, VerificationScanner(browser), NoopDownloader(), settings, NoopNotifier()
+    )  # type: ignore[arg-type]
+    revived._load_verification_hold()
+    assert revived.verification_hold_active() is True
+
+    async def run() -> None:
+        # 刚检查过，不到一小时不复查，不碰浏览器。
+        await revived.recheck_verification()
+        assert browser.closed_extras == 0
+
+        # 把上次检查时间推到一小时前，这一轮才会真正复查。
+        stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(
+            timespec="seconds"
+        )
+        revived._verification_checked_at = stale
+        await revived.recheck_verification()
+        assert browser.closed_extras == 1
 
     asyncio.run(run())
     db.close()

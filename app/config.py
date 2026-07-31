@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     schedule_jitter_seconds: int = Field(default=120, ge=0, le=600)
     download_concurrency: int = Field(default=1, ge=1, le=3)
     request_timeout_seconds: int = 90
+    # 撞上验证码后停下所有自动任务，每隔这么久才复查一次（也可在页面上手动复查）。
+    verification_recheck_seconds: int = Field(default=3600, ge=60, le=86400)
     # 关闭时留给正在下载的任务收尾的时间，必须明显小于 compose 的 stop_grace_period。
     shutdown_grace_seconds: int = Field(default=20, ge=1, le=110)
     dingtalk_enabled: bool = False

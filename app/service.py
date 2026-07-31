@@ -51,6 +51,9 @@ class SubscriptionService:
         self._download_stopping = asyncio.Event()
         self._download_wakeup = asyncio.Event()
         self._runtime_probe: Callable[[], bool] | None = None
+        self._verification_since: str | None = None
+        self._verification_reason: str | None = None
+        self._verification_checked_at: str | None = None
 
     def set_runtime_probe(self, probe: Callable[[], bool] | None) -> None:
         """注入浏览器运行时就绪探针，浏览器没起来时不要空转派发扫描。"""
@@ -65,9 +68,97 @@ class SubscriptionService:
         except Exception:
             return True
 
+    # ------------------------------------------------------------------
+    # 安全验证保持状态
+    #
+    # 撞上验证码后，原来只把当前主播标成 needs_verification，其余主播照常派发，
+    # 每个都会新开一个标签页再撞一次，Chromium 里很快堆满验证页，人也没法操作。
+    # 改为全局保持：一旦命中就停下所有自动扫描与下载，页面留在原处等人工完成，
+    # 之后由用户手动点"我已完成验证"，或每小时自动复查一次。
+    # ------------------------------------------------------------------
+
+    def _load_verification_hold(self) -> None:
+        self._verification_since = self.db.get_setting(VERIFICATION_SINCE_KEY) or None
+        self._verification_reason = self.db.get_setting(VERIFICATION_REASON_KEY) or None
+        self._verification_checked_at = self.db.get_setting(VERIFICATION_CHECKED_KEY) or None
+
+    def verification_hold_active(self) -> bool:
+        return self._verification_since is not None
+
+    def _verification_recheck_due(self) -> bool:
+        if not self._verification_checked_at:
+            return True
+        try:
+            checked = datetime.fromisoformat(self._verification_checked_at)
+        except ValueError:
+            return True
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        interval = max(60, int(self.settings.verification_recheck_seconds))
+        return datetime.now(timezone.utc) - checked >= timedelta(seconds=interval)
+
+    def verification_hold(self) -> dict[str, Any]:
+        return {
+            "active": self.verification_hold_active(),
+            "since": self._verification_since,
+            "reason": self._verification_reason,
+            "checked_at": self._verification_checked_at,
+            "recheck_seconds": int(self.settings.verification_recheck_seconds),
+            "recheck_due": self.verification_hold_active() and self._verification_recheck_due(),
+        }
+
+    def engage_verification_hold(self, reason: str) -> None:
+        if self.verification_hold_active():
+            return
+        now = utc_now()
+        self._verification_since = now
+        self._verification_reason = reason
+        self._verification_checked_at = now
+        self.db.set_setting(VERIFICATION_SINCE_KEY, now)
+        self.db.set_setting(VERIFICATION_REASON_KEY, reason)
+        self.db.set_setting(VERIFICATION_CHECKED_KEY, now)
+        self.db.add_log("warning", f"检测到安全验证，已暂停全部自动任务：{reason}")
+
+    def release_verification_hold(self) -> None:
+        if not self.verification_hold_active():
+            return
+        self._verification_since = None
+        self._verification_reason = None
+        self._verification_checked_at = None
+        for key in (VERIFICATION_SINCE_KEY, VERIFICATION_REASON_KEY, VERIFICATION_CHECKED_KEY):
+            self.db.set_setting(key, "")
+        self.db.add_log("info", "安全验证已解除，自动任务恢复")
+
+    async def recheck_verification(self, *, force: bool = False) -> dict[str, Any]:
+        """复查是否还卡在验证。只看已打开的页面，绝不新开页面。"""
+        if not self.verification_hold_active():
+            return self.verification_hold()
+        if not force and not self._verification_recheck_due():
+            return self.verification_hold()
+        now = utc_now()
+        self._verification_checked_at = now
+        self.db.set_setting(VERIFICATION_CHECKED_KEY, now)
+        browser = getattr(self.scanner, "browser", None)
+        if browser is None:
+            return self.verification_hold()
+        try:
+            still_blocked = await browser.has_pending_verification()
+        except Exception as exc:
+            self.db.add_log("warning", f"复查安全验证失败，保持暂停：{exc}")
+            return self.verification_hold()
+        if still_blocked:
+            with suppress(Exception):
+                closed = await browser.close_extra_verification_pages()
+                if closed:
+                    self.db.add_log("info", f"清理了 {closed} 个重复的验证页面")
+        else:
+            self.release_verification_hold()
+        return self.verification_hold()
+
     async def start(self) -> None:
         if any(not task.done() for task in self._download_tasks):
             return
+        self._load_verification_hold()
         cleanup_temp_files = getattr(self.downloader, "cleanup_stale_temp_files", None)
         removed_temp_files = cleanup_temp_files() if cleanup_temp_files else 0
         if removed_temp_files:
@@ -255,6 +346,11 @@ class SubscriptionService:
     async def _download_worker(self, worker_id: str) -> None:
         claim_failures = 0
         while not self._download_stopping.is_set():
+            if self.verification_hold_active():
+                # 验证期间不碰浏览器，下载同样会触发新的验证页。
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._download_stopping.wait(), timeout=5.0)
+                continue
             try:
                 jobs = self.db.claim_download_jobs(worker_id, limit=1)
             except Exception as exc:
@@ -326,6 +422,7 @@ class SubscriptionService:
                 finished_at=utc_now(),
             )
         except VerificationRequired as exc:
+            self.engage_verification_hold(str(exc))
             self.db.update_download_job(
                 job_id,
                 status="paused",
@@ -645,6 +742,7 @@ class SubscriptionService:
                 failure_reason=last_error,
             )
         except VerificationRequired as exc:
+            self.engage_verification_hold(str(exc))
             self.db.update_scan_job(
                 job_id,
                 status="paused",
@@ -703,6 +801,9 @@ class SubscriptionService:
         self.db.cleanup_expired_preview_sessions()
         if not self.browser_runtime_ready():
             # 浏览器还没拉起来就派发，只会把到期任务批量判失败并触发重试风暴。
+            return
+        if (await self.recheck_verification())["active"]:
+            # 验证期间一个页面都不再开，避免验证页越堆越多。
             return
         slots = self._resume_queued_scan_jobs(self.available_scan_slots())
         if slots <= 0:
@@ -962,6 +1063,7 @@ class SubscriptionService:
                 creator_id,
             )
         except VerificationRequired as exc:
+            self.engage_verification_hold(str(exc))
             if not scan_completed:
                 self.db.update_scan_job(
                     job_id,

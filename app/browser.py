@@ -270,7 +270,8 @@ class BrowserManager:
                 continue
         return closed
 
-    def _release_scan_slot(self, page: Page) -> None:        if page not in self._scan_pages:
+    def _release_scan_slot(self, page: Page) -> None:
+        if page not in self._scan_pages:
             return
         self._scan_pages.discard(page)
         if self._scan_page_lock.locked():

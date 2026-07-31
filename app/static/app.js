@@ -168,7 +168,11 @@ async function loadStatus() {
   $("#dashboardStorage").title = data.download_dir;
   $("#sidebarLoginText").textContent = accountText;
   $("#sidebarLoginDot").className = `status-dot ${data.verification_required ? "error" : data.logged_in ? "success" : data.browser_running ? "warning" : ""}`;
-  $("#loginHint").textContent = data.verification_required
+  const hold = data.verification_hold || {};
+  $("#verificationDoneButton").hidden = !hold.active;
+  $("#loginHint").textContent = hold.active
+    ? `已检测到安全验证，所有自动扫描和下载已暂停，不会再新开验证页面。请在 noVNC 里手动完成验证，然后点“我已完成验证”；不处理的话每 ${Math.round((hold.recheck_seconds || 3600) / 60)} 分钟会自动复查一次。`
+    : data.verification_required
     ? "抖音正在要求安全验证，请切换到已打开的 Chrome 窗口手动完成。"
     : data.logged_in
     ? `登录会话有效。下载目录：${data.download_dir}`
@@ -1075,6 +1079,16 @@ $("#editCreatorForm").addEventListener("submit", async event => {
   finally { button.disabled = false; }
 });
 $("#refreshButton").addEventListener("click", () => refreshVisible().catch(error => toast(error.message)));
+$("#verificationDoneButton").addEventListener("click", async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await api("/api/verification/recheck", {method: "POST"});
+    toast(result.message);
+    await loadStatus();
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+});
 $("#videosRefresh").addEventListener("click", loadVideos);
 $("#logsRefresh").addEventListener("click", loadLogs);
 $("#deleteCreatorConfirm").addEventListener("click", async () => {

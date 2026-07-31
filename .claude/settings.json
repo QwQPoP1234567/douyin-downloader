@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast,pathlib; ast.parse\\(pathlib.Path\\('app/service.py'\\).read_text\\(encoding='utf-8'\\)\\); print\\('语法 OK'\\)\")",
+      "Bash(python -c \"import ast,pathlib; ast.parse\\(pathlib.Path\\('app/service.py'\\).read_text\\(encoding='utf-8'\\)\\)\")",
+      "Bash(node --check app/static/app.js)"
+    ]
+  }
+}

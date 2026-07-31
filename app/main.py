@@ -157,6 +157,7 @@ async def api_status() -> dict:
     global login_verification_notified
     login = await browser.login_status()
     if login.get("verification_required"):
+        service.engage_verification_hold("管理页检测到抖音安全验证")
         if not login_verification_notified and notifier.status()["enabled"]:
             login_verification_notified = True
 
@@ -186,7 +187,20 @@ async def api_status() -> dict:
         "active_scans": service.active_scan_count(),
         "scan_concurrency": settings.scan_concurrency,
         "browser_runtime": runtime.status() if runtime is not None else None,
+        "verification_hold": service.verification_hold(),
     }
+
+
+@app.post("/api/verification/recheck")
+async def recheck_verification() -> dict:
+    """人工完成验证后立即复查。只检查已打开的页面，不会新开标签页。"""
+    state = await service.recheck_verification(force=True)
+    if state["active"]:
+        return {
+            **state,
+            "message": "仍检测到安全验证，请在 noVNC 里完成后再点一次",
+        }
+    return {**state, "message": "验证已解除，自动扫描与下载已恢复"}
 
 
 @app.post("/api/login/open")

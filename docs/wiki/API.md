@@ -14,6 +14,18 @@ FastAPI 自动文档通常可通过 `/docs` 访问。
 
 返回浏览器、登录、验证码、下载目录和任务数量。登录判定优先使用成功的个人资料接口响应，其次检查关键登录 Cookie。
 
+`verification_hold` 字段描述全局安全验证保持状态：
+
+```json
+{"active": true, "since": "...", "reason": "...", "checked_at": "...", "recheck_seconds": 3600, "recheck_due": false}
+```
+
+`active` 为 true 时，所有自动扫描与下载都已停止，且不会再新开任何页面。
+
+### `POST /api/verification/recheck`
+
+人工完成验证后立即复查。只检查已经打开的页面，不会新开标签页。验证已解除时清除保持状态并恢复自动任务，否则顺带关掉重复的验证页面。
+
 ## 2. 登录浏览器
 
 ### `POST /api/login/open`
