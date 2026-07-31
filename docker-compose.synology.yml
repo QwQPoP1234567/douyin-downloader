@@ -35,7 +35,7 @@ services:
     shm_size: "1gb"
     # /tmp 留在可写层时 X11 锁会跨重启存活，导致 Xvfb 误判 display 被占用。
     tmpfs:
-      - /tmp:mode=1777,size=${DOUYIN_TMPFS_SIZE:-256m}
+      - /tmp:mode=1777,size=${DOUYIN_TMPFS_SIZE:-512m}
     logging:
       driver: json-file
       options:

@@ -43,8 +43,10 @@ services:
     # /tmp 留在可写层时，X11 锁文件会跨重启存活，而新 PID 命名空间几乎必然把
     # 锁里记录的 PID 复用给别的进程，Xvfb 因此误判 "display already active"。
     # 挂成 tmpfs 后每次容器启动都是干净的 /tmp。
+    # 注意 Chromium 带 --disable-dev-shm-usage 时会把共享内存写到 /tmp，
+    # 尺寸不能给太小；tmpfs 按实际用量占用内存，并计入 mem_limit。
     tmpfs:
-      - /tmp:mode=1777,size=${DOUYIN_TMPFS_SIZE:-256m}
+      - /tmp:mode=1777,size=${DOUYIN_TMPFS_SIZE:-512m}
     # 容器日志不封顶会在 NAS 上慢慢吃光系统卷。
     logging:
       driver: json-file
