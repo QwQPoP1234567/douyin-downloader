@@ -189,8 +189,15 @@ curl http://127.0.0.1:8765/api/health
 预期包含：
 
 ```json
-{"ok":true,"scheduler_running":true,"browser_cdp_ok":true}
+{
+  "ok": true,
+  "scheduler_running": true,
+  "browser_cdp_ok": true,
+  "browser_runtime": {"ready": true, "generation": 1, "restart_count": 0, "last_error": null}
+}
 ```
+
+`browser_runtime` 是浏览器看门狗状态。浏览器不可用时接口返回 503，容器显示 `unhealthy` 但不会被 Docker 重启（Docker 本身不会因健康检查失败重启容器），进程内看门狗会按退避持续拉起 Xvfb/Chromium，管理页保持可访问。
 
 ### 5.3 Docker 更新
 
@@ -207,6 +214,8 @@ docker compose ps
 ```bash
 docker compose restart douyin-downloader
 ```
+
+注意：`restart` 只重启容器内进程，不会应用 `tmpfs`、`logging`、`mem_limit` 等创建时参数。修改过 `docker-compose.yml` 后必须 `docker compose up -d` 让 Compose 重建容器。
 
 不要执行 `docker compose down -v`，本项目使用绑定挂载时通常不会删除宿主目录，但养成不带 `-v` 的操作习惯更安全。
 

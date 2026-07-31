@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
@@ -419,7 +420,10 @@ class BrowserManager:
             self._profile_tasks.clear()
         if self._context is not None and self._owns_context:
             try:
-                await self._context.close()
+                # Chromium 无响应时 close() 会一直挂住，把整个关闭流程拖到被 SIGKILL。
+                await asyncio.wait_for(self._context.close(), timeout=15)
+            except Exception:
+                pass
             finally:
                 self._context = None
         else:
@@ -436,7 +440,8 @@ class BrowserManager:
         self._browser = None
         self._connection_lost = False
         if self._playwright is not None:
-            await self._playwright.stop()
+            with suppress(Exception):
+                await asyncio.wait_for(self._playwright.stop(), timeout=10)
             self._playwright = None
 
 

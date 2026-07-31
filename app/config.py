@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     schedule_jitter_seconds: int = Field(default=120, ge=0, le=600)
     download_concurrency: int = Field(default=1, ge=1, le=3)
     request_timeout_seconds: int = 90
+    # 关闭时留给正在下载的任务收尾的时间，必须明显小于 compose 的 stop_grace_period。
+    shutdown_grace_seconds: int = Field(default=20, ge=1, le=110)
     dingtalk_enabled: bool = False
     dingtalk_webhook: str | None = None
     dingtalk_secret: str | None = None

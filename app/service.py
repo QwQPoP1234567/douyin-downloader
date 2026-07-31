@@ -248,12 +248,22 @@ class SubscriptionService:
         }
 
     async def _download_worker(self, worker_id: str) -> None:
+        claim_failures = 0
         while not self._download_stopping.is_set():
             try:
                 jobs = self.db.claim_download_jobs(worker_id, limit=1)
             except Exception as exc:
-                self.db.add_log("error", f"下载队列领取失败：{exc}")
+                # 数据库持续不可用时，原来的裸 continue 会变成满速死循环：
+                # 既烧 CPU，又把失败日志灌进同一个连不上的库。改为退避重试。
+                claim_failures += 1
+                if claim_failures <= 3:
+                    with suppress(Exception):
+                        self.db.add_log("error", f"下载队列领取失败：{exc}")
+                delay = min(30.0, 2.0 ** min(claim_failures, 5))
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._download_stopping.wait(), timeout=delay)
                 continue
+            claim_failures = 0
             if not jobs:
                 self._download_wakeup.clear()
                 try:
@@ -1288,20 +1298,33 @@ class SubscriptionService:
         temp_path.write_text(content, encoding="utf-8")
         os.replace(temp_path, metadata_path)
 
-    async def shutdown(self) -> None:
-        self._download_stopping.set()
-        self._download_wakeup.set()
-        running = [task for task in self._tasks.values() if not task.done()]
+    @staticmethod
+    async def _cancel_tasks(tasks: list[asyncio.Task[None]]) -> None:
+        running = [task for task in tasks if not task.done()]
+        if not running:
+            return
         for task in running:
             task.cancel()
-        if running:
-            await asyncio.gather(*running, return_exceptions=True)
-        preview_tasks = [task for task in self._preview_tasks.values() if not task.done()]
-        for task in preview_tasks:
-            task.cancel()
-        if preview_tasks:
-            await asyncio.gather(*preview_tasks, return_exceptions=True)
+        await asyncio.gather(*running, return_exceptions=True)
+
+    async def shutdown(self, timeout: float | None = None) -> None:
+        grace = float(
+            timeout if timeout is not None else self.settings.shutdown_grace_seconds
+        )
+        self._download_stopping.set()
+        self._download_wakeup.set()
+        await self._cancel_tasks(list(self._tasks.values()))
+        await self._cancel_tasks(list(self._preview_tasks.values()))
+        # 下载 worker 先给一段时间收尾当前任务，超时后强制取消。
+        # 只 gather 不 cancel 的话，一个大文件就能把关闭拖满整个 stop_grace_period，
+        # 最后被 Docker SIGKILL，反而比主动取消更脏。
         download_tasks = [task for task in self._download_tasks if not task.done()]
         if download_tasks:
-            await asyncio.gather(*download_tasks, return_exceptions=True)
+            _, pending = await asyncio.wait(download_tasks, timeout=grace)
+            if pending:
+                with suppress(Exception):
+                    self.db.add_log(
+                        "warning", f"关闭超时，强制取消 {len(pending)} 个下载任务"
+                    )
+                await self._cancel_tasks(list(pending))
         self._download_tasks.clear()

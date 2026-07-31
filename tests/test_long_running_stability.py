@@ -253,3 +253,62 @@ def test_runtime_reports_not_ready_before_start(tmp_path: Path) -> None:
     runtime = LinuxRuntime(_settings(tmp_path))
     assert runtime.ready is False
     assert runtime.status()["ready"] is False
+
+
+# ---------------------------------------------------------------------------
+# 关闭路径
+# ---------------------------------------------------------------------------
+
+
+def test_shutdown_cancels_downloads_that_outlast_the_grace_period(tmp_path: Path) -> None:
+    """下载 worker 只 gather 不 cancel 时，一个大文件能把关闭拖满 stop_grace_period。"""
+    db = Database(tmp_path / "shutdown.db")
+    db.initialize()
+    settings = _settings(tmp_path, shutdown_grace_seconds=1)
+    service = SubscriptionService(
+        db, BlockingScanner(), NoopDownloader(), settings, NoopNotifier()
+    )  # type: ignore[arg-type]
+
+    async def run() -> None:
+        never_finishes = asyncio.Event()
+        task = asyncio.create_task(never_finishes.wait())
+        service._download_tasks = [task]  # type: ignore[list-item]
+
+        await asyncio.wait_for(service.shutdown(), timeout=10)
+
+        assert task.cancelled() or task.done()
+        assert service._download_tasks == []
+
+    asyncio.run(run())
+    db.close()
+
+
+def test_shutdown_waits_for_downloads_that_finish_inside_the_grace_period(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "shutdown-graceful.db")
+    db.initialize()
+    settings = _settings(tmp_path, shutdown_grace_seconds=10)
+    service = SubscriptionService(
+        db, BlockingScanner(), NoopDownloader(), settings, NoopNotifier()
+    )  # type: ignore[arg-type]
+    finished = False
+
+    async def run() -> None:
+        nonlocal finished
+
+        async def quick_job() -> None:
+            nonlocal finished
+            await asyncio.sleep(0.05)
+            finished = True
+
+        task = asyncio.create_task(quick_job())
+        service._download_tasks = [task]  # type: ignore[list-item]
+
+        await asyncio.wait_for(service.shutdown(), timeout=10)
+
+        assert finished is True
+        assert not task.cancelled()
+
+    asyncio.run(run())
+    db.close()
