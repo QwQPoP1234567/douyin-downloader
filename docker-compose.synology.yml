@@ -3,6 +3,7 @@ services:
     image: mysql:8.4
     container_name: douyin-mysql
     restart: unless-stopped
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-2g}
     environment:
       TZ: UTC
       MYSQL_DATABASE: ${MYSQL_DATABASE:-douyin}
@@ -13,7 +14,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
       - --default-time-zone=+00:00
-      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-128M}
+      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-1G}
       - --innodb-log-buffer-size=${MYSQL_INNODB_LOG_BUFFER_SIZE:-16M}
       - --max-connections=${MYSQL_MAX_CONNECTIONS:-30}
       - --performance-schema=OFF
@@ -32,7 +33,9 @@ services:
     init: true
     restart: unless-stopped
     stop_grace_period: 2m
-    shm_size: "1gb"
+    # 群晖 Container Manager 不认 compose 的 cpus 参数，这里不做 CPU 限制。
+    mem_limit: ${DOUYIN_APP_MEMORY_LIMIT:-5g}
+    shm_size: ${DOUYIN_SHM_SIZE:-1gb}
     # /tmp 留在可写层时 X11 锁会跨重启存活，导致 Xvfb 误判 display 被占用。
     tmpfs:
       - /tmp:mode=1777,size=${DOUYIN_TMPFS_SIZE:-512m}

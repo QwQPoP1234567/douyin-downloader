@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,8 +25,23 @@ DEFAULTS = {
     "novnc_port": "6080",
     "download_concurrency": "1",
     "novnc_enabled": "true",
-    "mysql_buffer_pool": "128M",
+    "mysql_buffer_pool": "1G",
+    "app_memory_limit": "5g",
+    "mysql_memory_limit": "2g",
+    "scan_concurrency": "1",
+    "tmpfs_size": "512m",
+    "log_max_size": "10m",
 }
+
+# 允许 512m / 2g / 1024M / 1gb 这类写法，Docker 与 MySQL 都能接受。
+MEMORY_PATTERN = re.compile(r"^\d+[kKmMgG][bB]?$")
+
+
+def memory_value(value: str, field: str) -> str:
+    value = value.strip()
+    if not MEMORY_PATTERN.match(value):
+        raise ValueError(f"{field} 需要形如 512m、2g 的写法")
+    return value
 
 
 def generated_secret() -> str:
@@ -70,10 +86,27 @@ def build_env(form: dict[str, str], existing: dict[str, str] | None = None) -> s
     web_port = int(form.get("web_port", "8765"))
     novnc_port = int(form.get("novnc_port", "6080"))
     concurrency = int(form.get("download_concurrency", "1"))
+    scan_concurrency = int(form.get("scan_concurrency", "1"))
     if not 1 <= web_port <= 65535 or not 1 <= novnc_port <= 65535:
         raise ValueError("端口必须在 1～65535 之间")
     if not 1 <= concurrency <= 3:
         raise ValueError("下载并发必须在 1～3 之间")
+    if not 1 <= scan_concurrency <= 3:
+        raise ValueError("扫描并发必须在 1～3 之间")
+    app_memory = memory_value(
+        pick("app_memory_limit", "DOUYIN_APP_MEMORY_LIMIT", DEFAULTS["app_memory_limit"]),
+        "应用内存上限",
+    )
+    mysql_memory = memory_value(
+        pick("mysql_memory_limit", "MYSQL_MEMORY_LIMIT", DEFAULTS["mysql_memory_limit"]),
+        "MySQL 内存上限",
+    )
+    tmpfs_size = memory_value(
+        pick("tmpfs_size", "DOUYIN_TMPFS_SIZE", DEFAULTS["tmpfs_size"]), "临时目录大小"
+    )
+    log_max_size = memory_value(
+        pick("log_max_size", "DOUYIN_LOG_MAX_SIZE", DEFAULTS["log_max_size"]), "容器日志上限"
+    )
 
     values = {
         "TZ": "Asia/Shanghai",
@@ -81,7 +114,10 @@ def build_env(form: dict[str, str], existing: dict[str, str] | None = None) -> s
         "MYSQL_USER": pick("mysql_user", "MYSQL_USER", "douyin"),
         "MYSQL_PASSWORD": pick("mysql_password", "MYSQL_PASSWORD", generated_secret()),
         "MYSQL_ROOT_PASSWORD": pick("mysql_root_password", "MYSQL_ROOT_PASSWORD", generated_secret()),
-        "MYSQL_INNODB_BUFFER_POOL_SIZE": pick("mysql_buffer_pool", "MYSQL_INNODB_BUFFER_POOL_SIZE", "128M"),
+        "MYSQL_MEMORY_LIMIT": mysql_memory,
+        "MYSQL_INNODB_BUFFER_POOL_SIZE": pick(
+            "mysql_buffer_pool", "MYSQL_INNODB_BUFFER_POOL_SIZE", DEFAULTS["mysql_buffer_pool"]
+        ),
         "MYSQL_INNODB_LOG_BUFFER_SIZE": "16M",
         "MYSQL_MAX_CONNECTIONS": "30",
         "DOUYIN_DATABASE_POOL_SIZE": "3",
@@ -93,8 +129,13 @@ def build_env(form: dict[str, str], existing: dict[str, str] | None = None) -> s
         "DOUYIN_SCAN_BATCH_SIZE": "30",
         "DOUYIN_SCAN_NO_PROGRESS_SECONDS": "90",
         "DOUYIN_SCAN_CONTINUE_LIMIT": "100",
+        "DOUYIN_SCAN_CONCURRENCY": str(scan_concurrency),
         "DOUYIN_SCHEDULE_JITTER_SECONDS": "120",
         "DOUYIN_PREVIEW_SESSION_TTL_MINUTES": "120",
+        "DOUYIN_APP_MEMORY_LIMIT": app_memory,
+        "DOUYIN_TMPFS_SIZE": tmpfs_size,
+        "DOUYIN_LOG_MAX_SIZE": log_max_size,
+        "DOUYIN_LOG_MAX_FILE": "3",
         "DOUYIN_WEB_PORT": str(web_port),
         "DOUYIN_NOVNC_PORT": str(novnc_port),
         "DOUYIN_VNC_PASSWORD": pick("vnc_password", "DOUYIN_VNC_PASSWORD", generated_secret()),
@@ -133,6 +174,11 @@ def form_page(message: str = "") -> bytes:
         "download_concurrency": existing.get("DOUYIN_DOWNLOAD_CONCURRENCY", DEFAULTS["download_concurrency"]),
         "novnc_enabled": existing.get("DOUYIN_LINUX_NOVNC_ENABLED", DEFAULTS["novnc_enabled"]).lower(),
         "mysql_buffer_pool": existing.get("MYSQL_INNODB_BUFFER_POOL_SIZE", DEFAULTS["mysql_buffer_pool"]),
+        "app_memory_limit": existing.get("DOUYIN_APP_MEMORY_LIMIT", DEFAULTS["app_memory_limit"]),
+        "mysql_memory_limit": existing.get("MYSQL_MEMORY_LIMIT", DEFAULTS["mysql_memory_limit"]),
+        "scan_concurrency": existing.get("DOUYIN_SCAN_CONCURRENCY", DEFAULTS["scan_concurrency"]),
+        "tmpfs_size": existing.get("DOUYIN_TMPFS_SIZE", DEFAULTS["tmpfs_size"]),
+        "log_max_size": existing.get("DOUYIN_LOG_MAX_SIZE", DEFAULTS["log_max_size"]),
     }
     fields = {key: html.escape(value, quote=True) for key, value in fields.items()}
     selected = lambda actual, expected: " selected" if actual == expected else ""
@@ -146,7 +192,14 @@ def form_page(message: str = "") -> bytes:
     <label>noVNC 端口<input name="novnc_port" type="number" min="1" max="65535" value="{fields['novnc_port']}" required></label>
     <label>下载并发<select name="download_concurrency"><option value="1"{selected(fields['download_concurrency'], '1')}>1（低性能 NAS 推荐）</option><option value="2"{selected(fields['download_concurrency'], '2')}>2</option><option value="3"{selected(fields['download_concurrency'], '3')}>3</option></select></label>
     <label>noVNC<select name="novnc_enabled"><option value="true"{selected(fields['novnc_enabled'], 'true')}>启用</option><option value="false"{selected(fields['novnc_enabled'], 'false')}>关闭</option></select></label></div>
-    <h2 style="margin-top:24px">数据库与安全</h2><div class="grid"><label>数据库名称<input name="mysql_database" value="{fields['mysql_database']}" required></label><label>数据库用户<input name="mysql_user" value="{fields['mysql_user']}" required></label><label>MySQL 密码（留空则首次自动生成，升级时保留原值）<input name="mysql_password" type="password"></label><label>MySQL root 密码（留空则首次自动生成，升级时保留原值）<input name="mysql_root_password" type="password"></label><label>noVNC 密码（留空则首次自动生成，升级时保留原值）<input name="vnc_password" type="password"></label><label>MySQL 缓冲池<select name="mysql_buffer_pool"><option value="128M"{selected(fields['mysql_buffer_pool'], '128M')}>128M（低内存推荐）</option><option value="256M"{selected(fields['mysql_buffer_pool'], '256M')}>256M</option><option value="512M"{selected(fields['mysql_buffer_pool'], '512M')}>512M</option></select></label><label class="wide check"><input name="overwrite" type="checkbox" value="true"> 允许覆盖已有 .env</label></div><p class="note">密码只写入本机项目目录的 .env，不会显示在完成页面；覆盖配置时留空会保留现有密码。</p><div class="actions"><button type="submit">生成 Docker 配置</button></div></form>""")
+    <h2 style="margin-top:24px">数据库与安全</h2><div class="grid"><label>数据库名称<input name="mysql_database" value="{fields['mysql_database']}" required></label><label>数据库用户<input name="mysql_user" value="{fields['mysql_user']}" required></label><label>MySQL 密码（留空则首次自动生成，升级时保留原值）<input name="mysql_password" type="password"></label><label>MySQL root 密码（留空则首次自动生成，升级时保留原值）<input name="mysql_root_password" type="password"></label><label>noVNC 密码（留空则首次自动生成，升级时保留原值）<input name="vnc_password" type="password"></label><label>MySQL 缓冲池<select name="mysql_buffer_pool"><option value="128M"{selected(fields['mysql_buffer_pool'], '128M')}>128M（低内存）</option><option value="256M"{selected(fields['mysql_buffer_pool'], '256M')}>256M</option><option value="512M"{selected(fields['mysql_buffer_pool'], '512M')}>512M</option><option value="1G"{selected(fields['mysql_buffer_pool'], '1G')}>1G（推荐，配合 2G 内存上限）</option><option value="2G"{selected(fields['mysql_buffer_pool'], '2G')}>2G</option></select></label><label class="wide check"><input name="overwrite" type="checkbox" value="true"> 允许覆盖已有 .env</label></div><p class="note">密码只写入本机项目目录的 .env，不会显示在完成页面；覆盖配置时留空会保留现有密码。</p></div>
+    <h2 style="margin-top:24px">资源限制</h2><div class="grid">
+    <label>应用内存上限<input name="app_memory_limit" value="{fields['app_memory_limit']}" placeholder="5g" required></label>
+    <label>MySQL 内存上限<input name="mysql_memory_limit" value="{fields['mysql_memory_limit']}" placeholder="2g" required></label>
+    <label>扫描并发<select name="scan_concurrency"><option value="1"{selected(fields['scan_concurrency'], '1')}>1（推荐，浏览器只有一把扫描锁）</option><option value="2"{selected(fields['scan_concurrency'], '2')}>2</option><option value="3"{selected(fields['scan_concurrency'], '3')}>3</option></select></label>
+    <label>容器临时目录大小<input name="tmpfs_size" value="{fields['tmpfs_size']}" placeholder="512m" required></label>
+    <label>单个容器日志上限<input name="log_max_size" value="{fields['log_max_size']}" placeholder="10m" required></label></div>
+    <p class="note">写法形如 <b>512m</b>、<b>2g</b>。Chromium 比较吃内存，应用内存上限建议不低于 2g；临时目录是内存盘，会计入应用内存上限。群晖不支持 compose 的 CPU 限制参数，因此这里不提供 CPU 选项。</p><div class="actions"><button type="submit">生成 Docker 配置</button></div></form>""")
 
 
 class Handler(BaseHTTPRequestHandler):

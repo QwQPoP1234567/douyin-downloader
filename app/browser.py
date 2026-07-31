@@ -228,8 +228,49 @@ class BrowserManager:
         page.on("close", release_slot)
         return page
 
-    def _release_scan_slot(self, page: Page) -> None:
-        if page not in self._scan_pages:
+    async def has_pending_verification(self) -> bool:
+        """检查是否仍卡在安全验证。只看已经打开的页面，绝不新开页面。"""
+        if self._context is None or not self._connection_alive():
+            return False
+        for page in list(self._context.pages):
+            if page.is_closed():
+                continue
+            try:
+                if await page_needs_verification(page):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def close_extra_verification_pages(self, keep: int = 1) -> int:
+        """验证页只保留最新的若干个。
+
+        每次扫描撞上验证码都会留下一个标签页，累积下来 Chromium 里全是验证页，
+        既吃内存又让人无从下手。保留最新的一个供人工完成，其余关掉。
+        """
+        if self._context is None or not self._connection_alive():
+            return 0
+        blocked: list[Page] = []
+        for page in list(self._context.pages):
+            if page.is_closed():
+                continue
+            try:
+                if await page_needs_verification(page):
+                    blocked.append(page)
+            except Exception:
+                continue
+        closed = 0
+        for page in blocked[: max(0, len(blocked) - max(0, keep))]:
+            self._retained_pages.discard(page)
+            self._managed_pages.discard(page)
+            try:
+                await page.close()
+                closed += 1
+            except Exception:
+                continue
+        return closed
+
+    def _release_scan_slot(self, page: Page) -> None:        if page not in self._scan_pages:
             return
         self._scan_pages.discard(page)
         if self._scan_page_lock.locked():

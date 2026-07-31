@@ -3,8 +3,7 @@ services:
     image: mysql:8.4
     container_name: douyin-mysql
     restart: unless-stopped
-    mem_limit: ${MYSQL_MEMORY_LIMIT:-384m}
-    cpus: ${MYSQL_CPU_LIMIT:-0.50}
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-2g}
     environment:
       TZ: UTC
       MYSQL_DATABASE: ${MYSQL_DATABASE:-douyin}
@@ -15,7 +14,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
       - --default-time-zone=+00:00
-      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-128M}
+      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-1G}
       - --innodb-log-buffer-size=${MYSQL_INNODB_LOG_BUFFER_SIZE:-16M}
       - --max-connections=${MYSQL_MAX_CONNECTIONS:-30}
       - --performance-schema=OFF
@@ -37,8 +36,9 @@ services:
     init: true
     restart: unless-stopped
     stop_grace_period: 2m
-    mem_limit: ${DOUYIN_APP_MEMORY_LIMIT:-1024m}
-    cpus: ${DOUYIN_APP_CPU_LIMIT:-1.25}
+    # 群晖的 Container Manager 不认 compose 的 cpus 参数，会直接报错，
+    # 所以这里不做 CPU 限制。需要限制时用 cpu_shares（相对权重，兼容性最好）。
+    mem_limit: ${DOUYIN_APP_MEMORY_LIMIT:-5g}
     shm_size: ${DOUYIN_SHM_SIZE:-256mb}
     # /tmp 留在可写层时，X11 锁文件会跨重启存活，而新 PID 命名空间几乎必然把
     # 锁里记录的 PID 复用给别的进程，Xvfb 因此误判 "display already active"。

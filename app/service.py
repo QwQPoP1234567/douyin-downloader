@@ -26,6 +26,11 @@ from app.notifier import DingTalkNotifier
 from app.policies import should_auto_download, should_request_confirmation
 
 
+VERIFICATION_SINCE_KEY = "verification_hold_since"
+VERIFICATION_REASON_KEY = "verification_hold_reason"
+VERIFICATION_CHECKED_KEY = "verification_hold_checked_at"
+
+
 class SubscriptionService:
     def __init__(
         self,
